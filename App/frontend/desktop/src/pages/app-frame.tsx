@@ -1431,7 +1431,14 @@ export function AppFrame(props: AppFrameProps) {
         onResizeBy={sidebarResize.resizeBy}
       />
 
-      <main className={`relative min-w-0 flex-1 overflow-hidden flex flex-col bg-content-bg${sidebarHidden ? " app-frame-main--sidebar-hidden" : ""}`} aria-label={props.title}>
+      <main
+        className={`relative min-w-0 flex-1 overflow-hidden flex flex-col bg-content-bg${sidebarHidden ? " app-frame-main--sidebar-hidden" : ""}`}
+        aria-label={props.title}
+        onScroll={(event) => {
+          if (event.currentTarget.scrollTop !== 0) event.currentTarget.scrollTop = 0;
+          if (event.currentTarget.scrollLeft !== 0) event.currentTarget.scrollLeft = 0;
+        }}
+      >
         {props.reserveTopBar !== false && (
           <header className={`app-frame-content-topbar${props.topBarBorder ? " app-frame-content-topbar--bordered" : ""}`}>
             {props.topBar}
@@ -1439,7 +1446,7 @@ export function AppFrame(props: AppFrameProps) {
         )}
         <div
           className={`min-h-0 h-full flex-1 overflow-hidden${
-            sidebarHidden && !props.topBarBorder ? " app-frame-content-body--sidebar-hidden" : ""
+            sidebarHidden && props.reserveTopBar !== false && !props.topBarBorder ? " app-frame-content-body--sidebar-hidden" : ""
           }`}
           style={props.topBarBorder ? { paddingTop: "var(--codex-toolbar-height)" } : undefined}
         >

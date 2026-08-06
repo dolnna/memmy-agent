@@ -49,6 +49,13 @@ describe("prototype page structure alignment", () => {
     expect(source("pages/home-page.tsx")).toContain("w-full px-5 pt-4 pb-12 text-sm resize-none focus:outline-none rounded-card-lg bg-background-paper placeholder:text-text-ink/40");
     expect(source("pages/home-page.tsx")).toContain("absolute bottom-3 right-4 flex items-center gap-2");
     expect(source("pages/home-page.tsx")).not.toContain("home.suggestion.");
+    expect(source("pages/home-page.tsx")).toContain("TaskScenarioPicker");
+    expect(source("pages/home-page.tsx")).toContain("home.scenario.label");
+    expect(source("pages/home-page.tsx")).toContain("home.scenario.literatureReview");
+    expect(source("pages/home-page.tsx")).toContain("home.scenario.literatureReview.placeholder");
+    expect(source("pages/home-page.tsx")).toContain("home.scenario.literatureReview.prompt");
+    expect(source("pages/home-page.tsx")).toContain("home.scenario.literatureReview.lead");
+    expect(source("pages/home-page.tsx")).toContain("home.scenario.new");
     expect(source("pages/home-page.tsx")).toContain("agent-conversation-panel flex flex-col h-full");
     expect(source("pages/home-page.tsx")).toContain("app-frame-page-content agent-conversation-scroll flex-1 overflow-y-auto");
     expect(source("pages/home-page.tsx")).toContain("max-w-3xl mx-auto space-y-3");

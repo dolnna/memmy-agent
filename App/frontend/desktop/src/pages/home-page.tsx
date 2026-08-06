@@ -72,8 +72,15 @@ import {
   writePendingFirstEncounterTaskLaunch
 } from "./first-encounter-task-launch.js";
 import { HistoryDagPanel, type HistoryDagPanelState } from "./history-dag-panel.js";
+import { LiteratureReviewPreviewPanel } from "./literature-review-preview-panel.js";
+import { LiteratureReviewWorkflowMock, LiteratureTodo } from "./literature-review-workflow-mock.js";
 import { Mic, Pause, Plus, Send } from "./memory/memory-prototype-icons.js";
-import { ArrowDown, Check, ChevronDown, Folder, Plus as LucidePlus, RotateCw, X } from "lucide-react";
+import { ArrowDown, BookOpen, Check, ChevronDown, Folder, LayoutTemplate, PanelRight, Plus as LucidePlus, RotateCw, X } from "lucide-react";
+
+function readLiteratureWorkflowMockFlag(): boolean {
+  if (typeof window === "undefined") return false;
+  return new URLSearchParams(window.location.search).get("literatureWorkflowMock") === "1";
+}
 
 export { agentChatScopeKey, updateComposerDraftForScope };
 export { hydrateAgentThreadInBackground };
@@ -652,6 +659,7 @@ export async function submitAgentComposerMessage(input: SubmitAgentComposerMessa
  * @returns The chat home page node.
  */
 export function HomePage() {
+  const literatureWorkflowMock = readLiteratureWorkflowMockFlag();
   const { clients } = useApiClients();
   const { state, dispatch } = useAppState();
   const { language, t } = useTranslation();
@@ -674,6 +682,12 @@ export function HomePage() {
   const [historyDagPanel, setHistoryDagPanel] = useState<HistoryDagPanelState>({ open: false });
   const [isCreatingChat, setIsCreatingChat] = useState(false);
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
+  const [scenarioPickerOpen, setScenarioPickerOpen] = useState(false);
+  const [selectedScenario, setSelectedScenario] = useState<TaskScenarioId>("none");
+  const [literaturePreviewOpen, setLiteraturePreviewOpen] = useState(literatureWorkflowMock);
+  const [literaturePreviewFileRequest, setLiteraturePreviewFileRequest] = useState<string | null>(null);
+  const [literatureTodoCompletedCount, setLiteratureTodoCompletedCount] = useState(0);
+  const [literatureTodoVisible, setLiteratureTodoVisible] = useState(true);
   const [projectPickerOperationId, setProjectPickerOperationId] = useState<string | null>(null);
   const [firstEncounterRelayChatId, setFirstEncounterRelayChatId] = useState<string | null>(() => (
     readFirstEncounterRelayChat(typeof window === "undefined" ? undefined : window.sessionStorage)
@@ -712,6 +726,12 @@ export function HomePage() {
   const selectedDraftProject = draftTarget.kind === "project"
     ? state.agent.projects.find((project) => project.id === draftTarget.projectId) ?? null
     : null;
+  const activeSession = state.agent.currentSessionKey
+    ? state.agent.sessions.find((session) => session.key === state.agent.currentSessionKey) ?? null
+    : null;
+  const activeSessionProject = activeSession?.projectId
+    ? state.agent.projects.find((project) => project.id === activeSession.projectId) ?? null
+    : null;
   const currentSessionProjectBlocked = state.agent.projectRegistryState === "corrupt"
     && Boolean(
       state.agent.currentSessionKey
@@ -725,6 +745,7 @@ export function HomePage() {
     ? state.agent.historyVersionByChatId[state.agent.currentChatId] ?? 0
     : state.agent.newChatRequestId;
   const hasActiveConversation = hasActiveAgentConversation(state.agent.currentChatId, state.agent.messages.length);
+  const showConversation = literatureWorkflowMock || hasActiveConversation;
   const activeConversationTitle = state.agent.currentSessionKey
     ? state.agent.tasks.find((task) => task.sessionKey === state.agent.currentSessionKey)?.title.trim() || t("home.title")
     : t("home.title");
@@ -768,6 +789,28 @@ export function HomePage() {
   }));
   const relayAgents = relayAgentOptions(agentSourceOptions);
   const hasDetectedAgents = hasDetectedRelayAgents(agentSourceOptions);
+
+  useEffect(() => {
+    if (!literatureWorkflowMock) return;
+    const states = [
+      { completed: 1, visible: true },
+      { completed: 2, visible: true },
+      { completed: 3, visible: true },
+      { completed: 4, visible: true },
+      { completed: 5, visible: true },
+      { completed: 5, visible: true },
+      { completed: 5, visible: false },
+      { completed: 0, visible: true },
+    ];
+    let index = 0;
+    const timer = window.setInterval(() => {
+      const next = states[index] ?? { completed: 0, visible: true };
+      setLiteratureTodoCompletedCount(next.completed);
+      setLiteratureTodoVisible(next.visible);
+      index = (index + 1) % states.length;
+    }, 1_500);
+    return () => window.clearInterval(timer);
+  }, [literatureWorkflowMock]);
 
   const rememberFirstEncounterRelayChatIfArmed = useCallback((chatId: string) => {
     const storage = typeof window === "undefined" ? undefined : window.sessionStorage;
@@ -1284,14 +1327,16 @@ export function HomePage() {
     messageSendLocksRef.current.add(sendScopeKey);
     dispatch(agentActions.messageSendLockUpdated(sendScopeKey, clientRequestId));
     const target: WebuiSessionTarget | null = state.agent.currentChatId ? null : draftTarget;
+    const isNewLiteratureReviewTask = !state.agent.currentChatId && selectedScenario === "literature-review";
+    const contentToSend = isNewLiteratureReviewTask ? composeScenarioContent(input) : input;
     try {
-      await submitAgentComposerMessage({
+      const sent = await submitAgentComposerMessage({
         chatId: state.agent.currentChatId,
         target,
         clientRequestId,
         connection,
         ensureChatSubscription,
-        content: input,
+        content: contentToSend,
         language,
         pendingAttachments,
         uploadAgentMedia: (attachments) => clients!.memmyAgent.uploadAgentMedia(attachments),
@@ -1314,6 +1359,9 @@ export function HomePage() {
           }
           : undefined
       });
+      if (sent && isNewLiteratureReviewTask) {
+        setSelectedScenario("none");
+      }
     } finally {
       messageSendLocksRef.current.delete(sendScopeKey);
       dispatch(agentActions.messageSendLockUpdated(sendScopeKey, null));
@@ -1491,6 +1539,49 @@ export function HomePage() {
     ) {
       loadSlashCommands({ resetAttempts: true });
     }
+  }
+
+  function applyScenarioPrompt(prompt: string, cursorAfter?: string) {
+    updateComposerInput(prompt);
+    requestAnimationFrame(() => {
+      if (!inputRef.current) return;
+      resizeComposerInput(inputRef.current);
+      inputRef.current.focus();
+      const markerIndex = cursorAfter ? prompt.indexOf(cursorAfter) : -1;
+      const cursor = markerIndex >= 0 ? markerIndex + cursorAfter!.length : prompt.length;
+      inputRef.current.setSelectionRange(cursor, cursor);
+    });
+  }
+
+  function selectTaskScenario(scenarioId: TaskScenarioId) {
+    const literaturePrompt = t("home.scenario.literatureReview.prompt");
+    setSelectedScenario(scenarioId);
+    setScenarioPickerOpen(false);
+    if (scenarioId === "literature-review") {
+      applyScenarioPrompt(literaturePrompt, t("home.scenario.literatureReview.cursorAfter"));
+      return;
+    }
+    if (input.trim() === literaturePrompt.trim()) {
+      applyScenarioPrompt("");
+      return;
+    }
+    focusComposerInput();
+  }
+
+  function focusComposerInput() {
+    requestAnimationFrame(() => {
+      if (!inputRef.current) return;
+      resizeComposerInput(inputRef.current);
+      inputRef.current.focus();
+    });
+  }
+
+  function composeScenarioContent(userText: string): string {
+    const trimmed = userText.trim();
+    if (!trimmed || selectedScenario !== "literature-review") {
+      return userText;
+    }
+    return `${t("home.scenario.literatureReview.lead")}\n${trimmed}`;
   }
 
 
@@ -1979,14 +2070,9 @@ export function HomePage() {
   return (
     <AppFrame
       title={t("home.title")}
-      topBar={hasActiveConversation ? (
-        <h1 className="agent-conversation-title" title={activeConversationTitle}>
-          {activeConversationTitleDisplay}
-        </h1>
-      ) : null}
-      topBarBorder={hasActiveConversation}
+      reserveTopBar={!showConversation}
     >
-      {!hasActiveConversation ? (
+      {!showConversation ? (
         <section className="app-frame-page-content home-empty-screen flex flex-col items-center justify-center h-full">
           <div className="text-center mb-8">
             <div className="home-empty-brand-mascot flex justify-center">
@@ -2022,7 +2108,9 @@ export function HomePage() {
                 <textarea
                   ref={inputRef}
                   value={input}
-                  placeholder={t("home.input")}
+                  placeholder={selectedScenario === "literature-review"
+                    ? t("home.scenario.literatureReview.placeholder")
+                    : t("home.input")}
                   rows={3}
                   onChange={(event) => {
                     updateComposerInput(event.target.value);
@@ -2070,10 +2158,24 @@ export function HomePage() {
                   sessions={state.agent.sessions}
                   registryState={state.agent.projectRegistryState}
                   disabled={messageSendInFlight || projectPickerOperationId != null}
-                  onToggle={() => setProjectPickerOpen((open) => !open)}
+                  onToggle={() => {
+                    setScenarioPickerOpen(false);
+                    setProjectPickerOpen((open) => !open);
+                  }}
                   onClose={() => setProjectPickerOpen(false)}
                   onSelect={selectDraftTarget}
                   onChooseOther={() => void selectOtherProjectFolder()}
+                />
+                <TaskScenarioPicker
+                  open={scenarioPickerOpen}
+                  selectedScenario={selectedScenario}
+                  disabled={messageSendInFlight}
+                  onToggle={() => {
+                    setProjectPickerOpen(false);
+                    setScenarioPickerOpen((open) => !open);
+                  }}
+                  onClose={() => setScenarioPickerOpen(false)}
+                  onSelect={selectTaskScenario}
                 />
               </div>
             </div>
@@ -2085,7 +2187,23 @@ export function HomePage() {
           </div>
         </section>
       ) : (
-        <section className="agent-conversation-panel flex flex-col h-full">
+        <div className="agent-conversation-preview-layout">
+          <section className="agent-conversation-panel flex flex-col h-full">
+          <header className="agent-conversation-local-topbar">
+            <div className="agent-conversation-title-group">
+              <h1
+                className="agent-conversation-title"
+                title={literatureWorkflowMock ? "大模型长期记忆" : activeConversationTitle}
+              >
+                {literatureWorkflowMock ? "大模型长期记忆" : activeConversationTitleDisplay}
+              </h1>
+              {literatureWorkflowMock ? (
+                <span className="agent-conversation-scenario-label" title="任务场景创建后不可更改">
+                  文献综述
+                </span>
+              ) : null}
+            </div>
+          </header>
           <div
             ref={scrollRef}
             className="app-frame-page-content agent-conversation-scroll flex-1 overflow-y-auto"
@@ -2094,30 +2212,40 @@ export function HomePage() {
             onTouchMove={markAgentConversationUserScrollIntent}
           >
             <div className="max-w-3xl mx-auto space-y-3">
-              {displayConnectionStatus !== "connected" && (
+              {!literatureWorkflowMock && displayConnectionStatus !== "connected" && (
                 <div className="text-center">
                   <span className="inline-flex text-[11px] px-3 py-1 rounded-tag bg-background-paper text-text-ink/55 border border-border-stone/30">
                     {agentStatusText(displayConnectionStatus, state.agent.modelName, t)}
                   </span>
                 </div>
               )}
-              <AgentThreadMessages
-                key={chatScopeKey}
-                chatScopeKey={chatScopeKey}
-                historyVersion={currentHistoryVersion}
-                messages={state.agent.messages}
-                afterMessageId={firstEncounterRelayAnchorMessageId}
-                afterMessageContent={firstEncounterRelayContent}
-                forceMessageActionsForMessageId={firstEncounterRelayAnswerMessageId}
-                retryWaitStatus={state.agent.currentChatId ? state.agent.retryWaitStatusByChatId[state.agent.currentChatId] ?? null : null}
-                isSending={state.agent.isSending}
-                sanitizePlatformApiErrors={sanitizePlatformApiErrors}
-                accountMode={isAccountMode}
-                artifactClient={sessionArtifactClient}
-              />
+              {literatureWorkflowMock ? (
+                <LiteratureReviewWorkflowMock
+                  completedTodoCount={literatureTodoCompletedCount}
+                  onOpenArtifact={(fileId) => {
+                    setLiteraturePreviewFileRequest(fileId);
+                    setLiteraturePreviewOpen(true);
+                  }}
+                />
+              ) : (
+                <AgentThreadMessages
+                  key={chatScopeKey}
+                  chatScopeKey={chatScopeKey}
+                  historyVersion={currentHistoryVersion}
+                  messages={state.agent.messages}
+                  afterMessageId={firstEncounterRelayAnchorMessageId}
+                  afterMessageContent={firstEncounterRelayContent}
+                  forceMessageActionsForMessageId={firstEncounterRelayAnswerMessageId}
+                  retryWaitStatus={state.agent.currentChatId ? state.agent.retryWaitStatusByChatId[state.agent.currentChatId] ?? null : null}
+                  isSending={state.agent.isSending}
+                  sanitizePlatformApiErrors={sanitizePlatformApiErrors}
+                  accountMode={isAccountMode}
+                  artifactClient={sessionArtifactClient}
+                />
+              )}
             </div>
           </div>
-          {showScrollToBottomFab ? (
+          {showScrollToBottomFab && !(literatureWorkflowMock && literatureTodoVisible) ? (
             <button
               type="button"
               className="agent-scroll-to-bottom-fab"
@@ -2129,6 +2257,11 @@ export function HomePage() {
             </button>
           ) : null}
           <div className="agent-conversation-composer">
+            {literatureWorkflowMock && literatureTodoVisible ? (
+              <div className="literature-todo-dock max-w-3xl mx-auto">
+                <LiteratureTodo completedCount={literatureTodoCompletedCount} />
+              </div>
+            ) : null}
             <div className="max-w-3xl mx-auto">
               {currentSessionProjectBlocked ? (
                 <p className="mx-auto mb-2 w-fit rounded-tag border border-status-error/20 bg-status-error/5 px-3 py-1 text-xs text-status-error" role="status">
@@ -2188,7 +2321,9 @@ export function HomePage() {
                 <textarea
                   ref={inputRef}
                   value={input}
-                  placeholder={t("home.input")}
+                  placeholder={selectedScenario === "literature-review"
+                    ? t("home.scenario.literatureReview.placeholder")
+                    : t("home.input")}
                   rows={1}
                   onChange={(event) => {
                     updateComposerInput(event.target.value);
@@ -2232,7 +2367,30 @@ export function HomePage() {
               <input ref={fileInputRef} type="file" accept={AGENT_MEDIA_ACCEPT} multiple hidden className="hidden" onChange={(event) => void selectMedia(event)} />
             </div>
           </div>
-        </section>
+          </section>
+          {literaturePreviewOpen ? (
+            <LiteratureReviewPreviewPanel
+              sessionKey={literatureWorkflowMock ? "literature-workflow-mock" : state.agent.currentSessionKey ?? ""}
+              projectName={literatureWorkflowMock ? activeSessionProject?.name ?? "长期记忆研究" : activeSessionProject?.name ?? null}
+              requestedFileId={literaturePreviewFileRequest}
+              onRevealFile={literatureWorkflowMock
+                ? async () => undefined
+                : sessionArtifactClient
+                  ? (path) => sessionArtifactClient.revealArtifact(path)
+                  : undefined}
+            />
+          ) : null}
+          <button
+            type="button"
+            className={`agent-preview-corner-toggle${literaturePreviewOpen ? " is-active" : ""}`}
+            aria-label={t("home.preview")}
+            title={t("home.preview")}
+            aria-expanded={literaturePreviewOpen}
+            onClick={() => setLiteraturePreviewOpen((open) => !open)}
+          >
+            <PanelRight size={15} />
+          </button>
+        </div>
       )}
     </AppFrame>
   );
@@ -2403,6 +2561,107 @@ export const runProjectTargetFolderSelection = async (
 const preserveProjectTargetPickerSearchFocus = (event: ReactPointerEvent<HTMLButtonElement>) => {
   event.preventDefault();
 };
+
+export type TaskScenarioId = "none" | "literature-review";
+
+export function TaskScenarioPicker(props: {
+  open: boolean;
+  selectedScenario: TaskScenarioId;
+  disabled: boolean;
+  onToggle: () => void;
+  onClose: () => void;
+  onSelect: (scenarioId: TaskScenarioId) => void;
+}) {
+  const { t } = useTranslation();
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const selectedLabel = props.selectedScenario === "literature-review"
+    ? t("home.scenario.literatureReview")
+    : t("home.scenario.label");
+  const options: Array<{
+    id: TaskScenarioId;
+    label: string;
+    hint: string;
+    icon: typeof LayoutTemplate;
+    isNew?: boolean;
+  }> = [
+    {
+      id: "none",
+      label: t("home.scenario.none"),
+      hint: t("home.scenario.none.hint"),
+      icon: LayoutTemplate
+    },
+    {
+      id: "literature-review",
+      label: t("home.scenario.literatureReview"),
+      hint: t("home.scenario.literatureReview.hint"),
+      icon: BookOpen,
+      isNew: true
+    }
+  ];
+
+  useEffect(() => {
+    if (!props.open) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) props.onClose();
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    return () => document.removeEventListener("pointerdown", closeOnOutsidePointer);
+  }, [props.onClose, props.open]);
+
+  return (
+    <div
+      ref={rootRef}
+      className={`home-scenario-picker${props.open ? " home-scenario-picker--open" : ""}${props.selectedScenario !== "none" ? " home-scenario-picker--selected" : ""}`}
+    >
+      <button
+        type="button"
+        className="home-scenario-trigger"
+        disabled={props.disabled}
+        aria-haspopup="listbox"
+        aria-expanded={props.open}
+        title={props.selectedScenario === "literature-review" ? t("home.scenario.literatureReview.hint") : t("home.scenario.label")}
+        onClick={props.onToggle}
+      >
+        <LayoutTemplate size={13} strokeWidth={1.75} className="home-scenario-trigger__icon" aria-hidden="true" />
+        <span className="home-scenario-trigger__label">{selectedLabel}</span>
+        {props.selectedScenario === "none" ? (
+          <span className="home-scenario-new-badge" aria-hidden="true">{t("home.scenario.new")}</span>
+        ) : null}
+        <ChevronDown size={12} strokeWidth={1.75} className="home-scenario-trigger__chevron" aria-hidden="true" />
+      </button>
+      {props.open ? (
+        <div className="home-scenario-picker__menu" role="listbox" aria-label={t("home.scenario.label")}>
+          {options.map((option) => {
+            const Icon = option.icon;
+            const selected = props.selectedScenario === option.id;
+            return (
+              <button
+                key={option.id}
+                type="button"
+                role="option"
+                aria-selected={selected}
+                className={`home-scenario-picker__option${selected ? " home-scenario-picker__option--selected" : ""}`}
+                onClick={() => props.onSelect(option.id)}
+              >
+                <Icon size={13} strokeWidth={1.75} className="home-scenario-picker__option-icon" aria-hidden="true" />
+                <span className="home-scenario-picker__option-text">
+                  <span className="home-scenario-picker__option-title-row">
+                    <span className="home-scenario-picker__option-title">{option.label}</span>
+                    {option.isNew ? (
+                      <span className="home-scenario-new-badge">{t("home.scenario.new")}</span>
+                    ) : null}
+                  </span>
+                  <span className="home-scenario-picker__option-hint">{option.hint}</span>
+                </span>
+                {selected ? <Check size={13} strokeWidth={1.75} className="home-scenario-picker__check" aria-hidden="true" /> : null}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 export function ProjectTargetPicker(props: {
   open: boolean;
