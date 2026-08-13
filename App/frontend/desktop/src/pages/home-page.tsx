@@ -81,24 +81,17 @@ import {
 } from "./first-encounter-task-launch.js";
 import { HistoryDagPanel, type HistoryDagPanelState } from "./history-dag-panel.js";
 import {
-  ComposerHighlightedTextarea,
   ComposerQuickActionButtons,
   ComposerReferencePanel,
   HomeContextChips,
   mentionQueryFromInput,
   stripMentionFromInput,
-  type ComposerContextChip
+  type ComposerContextChip,
+  type HomeReferenceItem
 } from "./home-composer-quick-actions.js";
 import type { KbKnowledgeBase } from "./knowledge-demo-data.js";
-import {
-  LITREV_CONTEXT_STORAGE_KEY,
-  LITREV_PROJECT_CONTEXT_STORAGE_KEY,
-  LITREV_PROMPT_STORAGE_KEY,
-  LITREV_SOURCE_INPUT_STORAGE_KEY,
-  type HomeReferenceItem
-} from "./literature-review-demo-data.js";
 import { Mic, Pause, Plus, Send } from "./memory/memory-prototype-icons.js";
-import { ArrowDown, BookOpenText, CalendarCheck2, Check, ChevronDown, Folder, History, Plus as LucidePlus, RotateCw, X } from "lucide-react";
+import { ArrowDown, Check, ChevronDown, Folder, Plus as LucidePlus, RotateCw, X } from "lucide-react";
 
 export { agentChatScopeKey, updateComposerDraftForScope };
 export { hydrateAgentThreadInBackground };
@@ -285,73 +278,6 @@ export function isSingleLineComposerInput(element: HTMLTextAreaElement): boolean
   const paddingBottom = Number.parseFloat(style.paddingBottom) || 0;
   const singleLineHeight = (Number.isFinite(lineHeight) ? lineHeight : element.clientHeight) + paddingTop + paddingBottom;
   return element.scrollHeight <= singleLineHeight + COMPOSER_HEIGHT_EPSILON;
-}
-
-/** Adds a selected capability block without replacing the user's draft. */
-export function addCapabilityBlockToDraft(command: string, draft: string): string {
-  const existingDraft = draft.trim();
-  return existingDraft ? `${command}  ${existingDraft}` : `${command}  `;
-}
-
-/** Builds a suggestion draft with its capability locked in as a visible prefix chip. */
-export function homeSuggestionDraft(text: string, capability?: "/literature-review"): string {
-  return capability ? `${capability}  ${text}` : text;
-}
-
-/** Replaces only the trailing slash query, preserving text before it. */
-export function replaceTrailingSlashQuery(input: string, command: string, appendSpace: boolean): string {
-  const suffix = appendSpace ? " " : "";
-  return input.replace(/(^|\s)\/[^\s/]*$/, `$1${command}${suffix}`);
-}
-
-export interface ComposerTextEdit {
-  value: string;
-  caret: number;
-}
-
-/** Inserts a selected capability at the current textarea selection. */
-export function insertCapabilityAtSelection(
-  input: string,
-  command: string,
-  selectionStart: number,
-  selectionEnd = selectionStart
-): ComposerTextEdit {
-  const start = Math.max(0, Math.min(selectionStart, input.length));
-  const end = Math.max(start, Math.min(selectionEnd, input.length));
-  const before = input.slice(0, start);
-  const after = input.slice(end);
-  const leadingSpace = before && !/\s$/.test(before) ? "  " : "";
-  const trailingSpace = /^\s/.test(after) ? " " : "  ";
-  const insertion = `${leadingSpace}${command}${trailingSpace}`;
-  return {
-    value: `${before}${insertion}${after}`,
-    caret: before.length + insertion.length
-  };
-}
-
-/** Replaces the slash query immediately before the caret while preserving following text. */
-export function replaceSlashQueryAtSelection(
-  input: string,
-  command: string,
-  selectionStart: number,
-  selectionEnd = selectionStart,
-  appendSpace = true
-): ComposerTextEdit {
-  const start = Math.max(0, Math.min(selectionStart, input.length));
-  const end = Math.max(start, Math.min(selectionEnd, input.length));
-  const beforeCaret = input.slice(0, start);
-  const match = /(^|\s)\/[^\s/]*$/.exec(beforeCaret);
-  if (!match) {
-    return insertCapabilityAtSelection(input, command, start, end);
-  }
-  const queryStart = (match.index ?? 0) + (match[1]?.length ?? 0);
-  const before = input.slice(0, queryStart);
-  const after = input.slice(end);
-  const suffix = appendSpace ? (/^\s/.test(after) ? " " : "  ") : "";
-  return {
-    value: `${before}${command}${suffix}${after}`,
-    caret: before.length + command.length + suffix.length
-  };
 }
 
 export function isAgentConversationAtBottom(element: Pick<HTMLElement, "scrollTop" | "scrollHeight" | "clientHeight">): boolean {
@@ -851,9 +777,7 @@ export function HomePage() {
   const slashCommandsRetryTimerRef = useRef<number | null>(null);
   const slashCommandsAttemptRef = useRef(0);
   const [slashMenuDismissed, setSlashMenuDismissed] = useState(false);
-  const [slashPickerOpen, setSlashPickerOpen] = useState(false);
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
-  const [composerSelection, setComposerSelection] = useState({ start: 0, end: 0 });
   const [recentSlashCommands, setRecentSlashCommands] = useState<string[]>(() => readRecentSlashCommands());
   const [statusPanel, setStatusPanel] = useState<StatusPanelState>({ open: false });
   const [lastCompactionPanel, setLastCompactionPanel] = useState<StatusPanelState>({ open: false });
@@ -1468,26 +1392,13 @@ export function HomePage() {
     argHint: "",
     synthetic: true
   };
-  const literatureReviewSlashCommand: SlashCommandPaletteItem = {
-    command: "/literature-review",
-    title: t("home.capability.literatureReview"),
-    description: t("home.capability.literatureReviewHint"),
-    icon: "book-open",
-    argHint: t("home.capability.literatureReviewArgHint"),
-    synthetic: true
-  };
   const slashQuery = slashMenuDismissed
     ? null
-    : slashPickerOpen
-      ? ""
-      : slashQueryFromInput(input.slice(0, Math.min(composerSelection.start, input.length)));
-  const mentionQuery = mentionMenuDismissed || slashPickerOpen
-    ? null
-    : mentionQueryFromInput(input);
+    : slashQueryFromInput(input);
+  const mentionQuery = mentionMenuDismissed ? null : mentionQueryFromInput(input);
   const referenceMenuOpen = referencePickerOpen || mentionQuery != null;
   const localizedSlashCommands = localizeSlashCommands(slashCommands, language, t);
   const slashCommandsWithLocal = [
-    literatureReviewSlashCommand,
     lastCompactionSlashCommand,
     ...localizedSlashCommands.filter((command) => command.command !== "/last-compaction")
   ];
@@ -1517,22 +1428,18 @@ export function HomePage() {
     || pendingAttachments.some((item) => item.status === "ready")
   );
   const stopInFlight = state.agent.currentChatId ? Boolean(state.agent.stopInFlightByChatId[state.agent.currentChatId]) : false;
-  // Runs fully client-side, so it must stay sendable even while the agent connection is down.
-  const isLocalWorkflowCommand = /(?:^|\s)\/literature-review(?=\s|$)/i.test(input);
   const composerSubmitDisabled = isCurrentAgentRunning
     ? stopInFlight
-    : isLocalWorkflowCommand
-      ? false
-      : stopInFlight
-        || !hasComposerPayload
-        || hasBlockedPendingMedia
-        || !connection
-        || isCreatingChat
-        || messageSendInFlight
-        || currentSessionProjectBlocked
-        || draftProjectBlocked
-        || state.agent.connectionStatus !== "connected"
-        || state.agent.recoveringGeneration !== null;
+    : stopInFlight
+      || !hasComposerPayload
+      || hasBlockedPendingMedia
+      || !connection
+      || isCreatingChat
+      || messageSendInFlight
+      || currentSessionProjectBlocked
+      || draftProjectBlocked
+      || state.agent.connectionStatus !== "connected"
+      || state.agent.recoveringGeneration !== null;
   const centerComposerControls = isComposerSingleLine && pendingAttachments.length === 0 && contextChips.length === 0;
 
   useEffect(() => {
@@ -1714,32 +1621,6 @@ export function HomePage() {
 
   function runExactLocalSlashCommand(command: string): boolean {
     const normalized = command.trim().toLowerCase();
-    if (/(?:^|\s)\/literature-review(?=\s|$)/i.test(command)) {
-      const sourceInput = command.trim();
-      const request = sourceInput
-        .replace(/(?:^|\s)\/literature-review(?=\s|$)/i, " ")
-        .replace(/(?:^|\s)@\S+/g, " ")
-        .replace(/\s+/g, " ")
-        .trim();
-      try {
-        window.sessionStorage.setItem(LITREV_PROMPT_STORAGE_KEY, request);
-        window.sessionStorage.setItem(LITREV_SOURCE_INPUT_STORAGE_KEY, sourceInput);
-        window.sessionStorage.setItem(LITREV_CONTEXT_STORAGE_KEY, JSON.stringify(contextChips));
-        if (draftTarget.kind === "project") {
-          window.sessionStorage.setItem(LITREV_PROJECT_CONTEXT_STORAGE_KEY, draftTarget.projectId);
-        } else {
-          window.sessionStorage.removeItem(LITREV_PROJECT_CONTEXT_STORAGE_KEY);
-        }
-      } catch {
-        // Losing launch context only means the demo flow falls back to its defaults.
-      }
-      rememberSlashCommand("/literature-review");
-      setCurrentComposerDraft("");
-      dispatch(agentActions.composerContextReferencesUpdated(chatScopeKey, []));
-      setMentionMenuDismissed(true);
-      dispatch(appActions.navigate("/literature-review"));
-      return true;
-    }
     if (pendingAttachments.length > 0) return false;
     if (normalized === "/last-compaction") {
       rememberSlashCommand("/last-compaction");
@@ -1847,10 +1728,8 @@ export function HomePage() {
    *
    * @param value The latest input box content.
    */
-  function updateComposerInput(value: string, selectionStart = value.length, selectionEnd = selectionStart) {
+  function updateComposerInput(value: string) {
     setCurrentComposerDraft(value);
-    setComposerSelection({ start: selectionStart, end: selectionEnd });
-    setSlashPickerOpen(false);
     if (mentionQueryFromInput(value) != null) {
       setReferencePickerOpen(false);
     }
@@ -1898,22 +1777,6 @@ export function HomePage() {
     ));
   }
 
-  function selectHomeSuggestion(text: string, capability?: "/literature-review") {
-    const nextDraft = homeSuggestionDraft(text, capability);
-    setCurrentComposerDraft(nextDraft);
-    setComposerSelection({ start: nextDraft.length, end: nextDraft.length });
-    setReferencePickerOpen(false);
-    setMentionMenuDismissed(true);
-    setSlashMenuDismissed(true);
-    window.requestAnimationFrame(() => {
-      if (inputRef.current) {
-        resizeComposerInput(inputRef.current);
-        inputRef.current.focus();
-        inputRef.current.setSelectionRange(nextDraft.length, nextDraft.length);
-      }
-    });
-  }
-
   function pickMentionKnowledgeBase(base: KbKnowledgeBase) {
     addComposerContextChip({ kind: "kb", id: base.id, label: base.name });
     setCurrentComposerDraft((draft) => stripMentionFromInput(draft));
@@ -1935,23 +1798,6 @@ export function HomePage() {
     setSlashMenuDismissed(true);
     setMentionMenuDismissed(false);
     setReferencePickerOpen((open) => !open);
-  }
-
-  function insertComposerSlashTrigger() {
-    setProjectPickerOpen(false);
-    setReferencePickerOpen(false);
-    setMentionMenuDismissed(true);
-    setSlashMenuDismissed(false);
-    setSlashPickerOpen((open) => !open);
-    setSelectedCommandIndex(0);
-    if (
-      clients?.memmyAgent &&
-      slashCommandsRef.current.length === 0 &&
-      !slashCommandsInFlightRef.current
-    ) {
-      loadSlashCommands({ resetAttempts: true });
-    }
-    inputRef.current?.focus();
   }
 
   useLayoutEffect(() => {
@@ -1998,7 +1844,6 @@ export function HomePage() {
 
   function resetTransientConversationUi() {
     setSlashMenuDismissed(true);
-    setSlashPickerOpen(false);
     setSelectedCommandIndex(0);
     setStatusPanel({ open: false });
     closeLastCompactionPanel();
@@ -2123,10 +1968,6 @@ export function HomePage() {
    * @param command The command item the user selected.
    */
   function selectSlashCommand(command: SlashCommandPaletteItem) {
-    const selectedFromCapabilityPicker = slashPickerOpen;
-    const selectionStart = inputRef.current?.selectionStart ?? composerSelection.start;
-    const selectionEnd = inputRef.current?.selectionEnd ?? composerSelection.end;
-    setSlashPickerOpen(false);
     if (command.command === "/stop") {
       if (state.agent.isSending) {
         stopCurrentTurn();
@@ -2177,22 +2018,9 @@ export function HomePage() {
     }
 
     rememberSlashCommand(command.command);
-    const edit = selectedFromCapabilityPicker
-      ? insertCapabilityAtSelection(input, command.command, selectionStart, selectionEnd)
-      : replaceSlashQueryAtSelection(
-          input,
-          command.command,
-          selectionStart,
-          selectionEnd,
-          Boolean(command.argHint)
-        );
-    setCurrentComposerDraft(edit.value);
-    setComposerSelection({ start: edit.caret, end: edit.caret });
+    setCurrentComposerDraft(command.argHint ? `${command.command} ` : command.command);
     setSlashMenuDismissed(true);
-    window.requestAnimationFrame(() => {
-      inputRef.current?.focus();
-      inputRef.current?.setSelectionRange(edit.caret, edit.caret);
-    });
+    inputRef.current?.focus();
   }
 
   /**
@@ -2275,7 +2103,6 @@ export function HomePage() {
       }
       if (event.key === "Escape") {
         event.preventDefault();
-        setSlashPickerOpen(false);
         setSlashMenuDismissed(true);
         return;
       }
@@ -2469,16 +2296,14 @@ export function HomePage() {
       topBarBorder={hasActiveConversation}
     >
       {!hasActiveConversation ? (
-        <section className="app-frame-page-content home-empty-screen">
-          {/* Mid row stays vertically centered like the original empty home. */}
-          <div className="home-empty-mid">
-            <div className="text-center mb-8">
-              <div className="home-empty-brand-mascot flex justify-center">
-                <Memmy pose="think" size={165} className="memmy-bob" />
-              </div>
-              <h1 className="text-2xl font-bold text-text-ink">{t("home.subtitle")}</h1>
+        <section className="app-frame-page-content home-empty-screen flex flex-col items-center justify-center h-full">
+          <div className="text-center mb-8">
+            <div className="home-empty-brand-mascot flex justify-center">
+              <Memmy pose="think" size={165} className="memmy-bob" />
             </div>
-            <div className="home-empty-mid__composer">
+            <h1 className="text-2xl font-bold text-text-ink">{t("home.subtitle")}</h1>
+          </div>
+          <div className="w-full max-w-2xl">
               <AgentOperationErrorSlot message={agentError} />
               <div className="home-empty-composer-stack">
                 <div
@@ -2504,25 +2329,20 @@ export function HomePage() {
                       <HomeContextChips chips={contextChips} onRemove={removeComposerContextChip} />
                     </div>
                   ) : null}
-                  <ComposerHighlightedTextarea
-                    textareaRef={inputRef}
+                  <textarea
+                    ref={inputRef}
                     value={input}
-                    highlightedCommands={slashCommandsWithLocal.map((command) => command.command)}
                     placeholder={t("home.input")}
                     rows={3}
                     onChange={(event) => {
-                      updateComposerInput(
-                        event.target.value,
-                        event.target.selectionStart,
-                        event.target.selectionEnd
-                      );
+                      updateComposerInput(event.target.value);
                       resizeComposerInput(event.target);
                     }}
                     onKeyDown={handleComposerKeyDown}
                     onPaste={handleComposerPaste}
                     className="w-full px-5 pt-4 pb-12 text-sm resize-none focus:outline-none rounded-card-lg bg-background-paper placeholder:text-text-ink/40"
                   />
-                  {slashMenuOpen && !slashPickerOpen ? (
+                  {slashMenuOpen ? (
                     <ComposerCaretMenu textareaRef={inputRef} containerRef={composerShellRef} value={input}>
                       <AgentCommandPalette
                         commands={filteredSlashCommands}
@@ -2546,7 +2366,6 @@ export function HomePage() {
                   <ComposerQuickActionButtons
                     onAttach={openMediaFilePicker}
                     onInsertMention={insertComposerMentionTrigger}
-                    onInsertSlash={insertComposerSlashTrigger}
                     referenceMenu={referencePickerOpen && !slashMenuOpen ? (
                       <ComposerReferencePanel
                         open
@@ -2557,14 +2376,6 @@ export function HomePage() {
                         }}
                         onPickKnowledgeBase={pickMentionKnowledgeBase}
                         onPickReference={pickMentionReference}
-                      />
-                    ) : null}
-                    slashMenu={slashMenuOpen && slashPickerOpen ? (
-                      <AgentCommandPalette
-                        commands={filteredSlashCommands}
-                        heading={t("home.commandPalette.commands")}
-                        selectedIndex={selectedCommandIndex}
-                        onSelect={selectSlashCommand}
                       />
                     ) : null}
                   />
@@ -2608,35 +2419,9 @@ export function HomePage() {
                   />
                 </div>
               </div>
-              <div className="home-prompt-suggestions" aria-label={t("home.empty")}>
-                <button
-                  type="button"
-                  onClick={() => selectHomeSuggestion(t("home.suggestionPrompt.one"), "/literature-review")}
-                >
-                  <span className="home-prompt-suggestions__icon" aria-hidden="true"><BookOpenText size={15} /></span>
-                  <span>{t("home.suggestion.one")}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => selectHomeSuggestion(t("home.suggestionPrompt.two"))}
-                >
-                  <span className="home-prompt-suggestions__icon" aria-hidden="true"><CalendarCheck2 size={15} /></span>
-                  <span>{t("home.suggestion.two")}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => selectHomeSuggestion(t("home.suggestionPrompt.three"))}
-                >
-                  <span className="home-prompt-suggestions__icon" aria-hidden="true"><History size={15} /></span>
-                  <span>{t("home.suggestion.three")}</span>
-                </button>
-              </div>
-            </div>
-          </div>
-          <div className="home-empty-below">
             <div className="home-empty-status-area">
-              {statusText && <p className="text-center text-xs text-text-ink/45 mt-3">{statusText}</p>}
-              <p className="text-center text-[11px] text-text-ink/40 mt-3">{t("home.notice")}</p>
+              {statusText && <p className="text-center text-xs text-text-ink/45 mt-4">{statusText}</p>}
+              <p className="text-center text-[11px] text-text-ink/40 mt-4">{t("home.notice")}</p>
             </div>
             <input ref={fileInputRef} type="file" accept={AGENT_MEDIA_ACCEPT} multiple hidden className="hidden" onChange={(event) => void selectMedia(event)} />
           </div>
@@ -2699,11 +2484,6 @@ export function HomePage() {
                 onDragOver={handleComposerDragOver}
                 onDrop={handleComposerDrop}
               >
-                {slashMenuOpen && slashPickerOpen && (
-                  <div className="absolute left-0 bottom-full mb-3 z-40" style={{ width: "min(448px, 100%)" }}>
-                    <AgentCommandPalette commands={filteredSlashCommands} heading={t("home.commandPalette.commands")} selectedIndex={selectedCommandIndex} onSelect={selectSlashCommand} />
-                  </div>
-                )}
                 {statusPanel.open && !slashMenuOpen && (
                   <div className="absolute left-0 bottom-full mb-3 z-30 w-full" style={{ right: 0 }}>
                     <AgentStatusPanel state={statusPanel} closeLabel={t("common.close")} loadingLabel={t("home.agent.connecting")} onClose={() => setStatusPanel({ open: false })} />
@@ -2754,18 +2534,14 @@ export function HomePage() {
                   placeholder={t("home.input")}
                   rows={1}
                   onChange={(event) => {
-                    updateComposerInput(
-                      event.target.value,
-                      event.target.selectionStart,
-                      event.target.selectionEnd
-                    );
+                    updateComposerInput(event.target.value);
                     resizeComposerInput(event.target);
                   }}
                   onKeyDown={handleComposerKeyDown}
                   onPaste={handleComposerPaste}
                   className={`${isComposerSingleLine ? "agent-composer-input--single " : ""}block w-full pl-4 pr-20 py-3 text-sm resize-none focus:outline-none rounded-card-lg bg-background-paper placeholder:text-text-ink/40`}
                 />
-                {slashMenuOpen && !slashPickerOpen ? (
+                {slashMenuOpen ? (
                   <ComposerCaretMenu textareaRef={inputRef} containerRef={composerShellRef} value={input}>
                     <AgentCommandPalette
                       commands={filteredSlashCommands}

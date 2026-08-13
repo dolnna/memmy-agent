@@ -12,7 +12,6 @@ export interface ResizableSidebarOptions {
   defaultWidth: number;
   minWidth: number;
   maxWidth: number;
-  resizeDirection?: 1 | -1;
 }
 
 export interface ResizableSidebarState {
@@ -42,8 +41,7 @@ export function useResizableSidebar(options: ResizableSidebarOptions): Resizable
     storageKey,
     defaultWidth,
     minWidth,
-    maxWidth,
-    resizeDirection = 1
+    maxWidth
   } = options;
   const [width, setWidth] = useState(() => readStoredSidebarWidth(storageKey, defaultWidth, minWidth, maxWidth));
   const [dragState, setDragState] = useState<SidebarDragState | null>(null);
@@ -63,8 +61,8 @@ export function useResizableSidebar(options: ResizableSidebarOptions): Resizable
     [width]
   );
   const resizeBy = useCallback(
-    (delta: number) => setClampedWidth(width + delta * resizeDirection),
-    [resizeDirection, setClampedWidth, width]
+    (delta: number) => setClampedWidth(width + delta),
+    [setClampedWidth, width]
   );
   const sidebarStyle = useMemo<CSSProperties>(
     () => ({
@@ -97,7 +95,7 @@ export function useResizableSidebar(options: ResizableSidebarOptions): Resizable
     body.style.userSelect = "none";
 
     const handlePointerMove = (event: PointerEvent) => {
-      setClampedWidth(dragState.startWidth + (event.clientX - dragState.startX) * resizeDirection);
+      setClampedWidth(dragState.startWidth + event.clientX - dragState.startX);
     };
     const stopResize = () => setDragState(null);
 
@@ -112,7 +110,7 @@ export function useResizableSidebar(options: ResizableSidebarOptions): Resizable
       window.removeEventListener("pointerup", stopResize);
       window.removeEventListener("pointercancel", stopResize);
     };
-  }, [dragState, resizeDirection, setClampedWidth]);
+  }, [dragState, setClampedWidth]);
 
   return {
     width,

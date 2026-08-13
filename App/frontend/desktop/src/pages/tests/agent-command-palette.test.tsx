@@ -22,12 +22,11 @@ const commands: SlashCommandPaletteItem[] = [
 ];
 
 describe("AgentCommandPalette", () => {
-  it("detects a trailing slash query after arbitrary draft text", () => {
+  it("detects slash query mode only for a leading command token", () => {
     expect(slashQueryFromInput("/")).toBe("");
     expect(slashQueryFromInput("/his")).toBe("his");
     expect(slashQueryFromInput("/history 5")).toBeNull();
-    expect(slashQueryFromInput("show /history")).toBe("history");
-    expect(slashQueryFromInput("show /history more")).toBeNull();
+    expect(slashQueryFromInput("show /history")).toBeNull();
   });
 
   it("filters by command metadata and caps visible results", () => {

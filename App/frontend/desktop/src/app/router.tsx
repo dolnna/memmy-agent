@@ -57,7 +57,6 @@ import { ApiKeyOptionalPage } from "../pages/api-key-optional-page.js";
 import { ModelPage } from "../pages/model-page.js";
 import { HomePage } from "../pages/home-page.js";
 import { KnowledgePage } from "../pages/knowledge-page.js";
-import { LiteratureReviewPage } from "../pages/literature-review-page.js";
 import { LoginPage } from "../pages/login-page.js";
 import { MemoryPage, writeMemorySubPage } from "../pages/memory-page.js";
 import { OnboardingPage } from "../pages/onboarding-page.js";
@@ -378,8 +377,6 @@ function renderRoute(path: AppRoutePath) {
       return <MemoryPage initialSubPage="sources" />;
     case "/knowledge":
       return <KnowledgePage />;
-    case "/literature-review":
-      return <LiteratureReviewPage />;
     case "/settings":
       return <SettingsPage />;
     case "/pet":

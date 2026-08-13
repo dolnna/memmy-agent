@@ -58,8 +58,7 @@ describe("shared file icon system", () => {
     const sourceUrls = [
       new URL("../knowledge-page.tsx", import.meta.url),
       new URL("../home-composer-quick-actions.tsx", import.meta.url),
-      new URL("../agent-message-content.tsx", import.meta.url),
-      new URL("../literature-review-page.tsx", import.meta.url)
+      new URL("../agent-message-content.tsx", import.meta.url)
     ];
 
     for (const sourceUrl of sourceUrls) {
@@ -117,15 +116,12 @@ describe("shared file icon system", () => {
     const knowledge = readFileSync(new URL("../knowledge-page.tsx", import.meta.url), "utf8");
     const references = readFileSync(new URL("../home-composer-quick-actions.tsx", import.meta.url), "utf8");
     const messages = readFileSync(new URL("../agent-message-content.tsx", import.meta.url), "utf8");
-    const literature = readFileSync(new URL("../literature-review-page.tsx", import.meta.url), "utf8");
     const attachments = readFileSync(new URL("../agent-file-attachment-chip.tsx", import.meta.url), "utf8");
 
     expect(knowledge).toContain('<FileTypeIcon name={file.name} surface="row" />');
     expect(references).toContain('<FileTypeIcon name={item.path} surface="row" />');
     expect(references).toContain('<FileTypeIcon name={chip.label} surface="card" />');
     expect(messages).toContain('surface="inline"');
-    expect(literature).toContain('<FileTypeIcon name={context.id} surface="card" />');
-    expect(literature).toContain('<FileTypeIcon name={file.name} surface="inline" />');
     expect(attachments).toContain('surface={props.size === "md" ? "card" : "row"}');
   });
 });

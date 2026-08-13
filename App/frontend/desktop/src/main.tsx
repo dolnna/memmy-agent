@@ -7,7 +7,6 @@ import { NicknameModal } from "./components/nickname-modal.js";
 import { I18nProvider } from "./i18n/i18n-provider.js";
 import { randomNickname } from "./lib/nickname.js";
 import { KnowledgePage } from "./pages/knowledge-page.js";
-import { LiteratureReviewPage } from "./pages/literature-review-page.js";
 import { MemoryPage } from "./pages/memory-page.js";
 import { MemoryPluginConflictModal } from "./pages/memory-plugin-conflict-modal.js";
 import { StartupScreen } from "./pages/startup-screen.js";
@@ -90,15 +89,6 @@ function KnowledgePreview() {
   );
 }
 
-/** Design-complete literature-review mock: no backend required. */
-function LiteratureReviewPreview() {
-  return (
-    <AppProviders>
-      <LiteratureReviewPage />
-    </AppProviders>
-  );
-}
-
 const root = document.getElementById("root");
 
 if (!root) {
@@ -123,8 +113,6 @@ createRoot(root).render(
       <MemorySkillsPreview />
     ) : previewMode === "knowledge" ? (
       <KnowledgePreview />
-    ) : previewMode === "literature-review" ? (
-      <LiteratureReviewPreview />
     ) : (
       <App />
     )}
