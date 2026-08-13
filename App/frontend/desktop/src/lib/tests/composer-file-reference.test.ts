@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   MEMMY_COMPOSER_REFERENCE_MIME,
   mergeComposerContextReferences,
+  parseComposerReferencesFromContent,
   readComposerReferenceDrag,
   writeComposerReferenceDrag
 } from "../composer-file-reference.js";
@@ -39,5 +40,20 @@ describe("composer file references", () => {
     const base = { kind: "kb" as const, id: "kb-1", label: "研究资料" };
 
     expect(mergeComposerContextReferences([first], [first, base])).toEqual([first, base]);
+  });
+
+  it("restores file and knowledge references from canonical thread content", () => {
+    expect(parseComposerReferencesFromContent(
+      "请结合资料\n\n<memmy-context>\n"
+      + "- file: paper.pdf (/Users/memmy/paper.pdf)\n"
+      + "- knowledge-base: 研究资料 (kb-1)\n"
+      + "</memmy-context>"
+    )).toEqual({
+      content: "请结合资料",
+      references: [
+        { kind: "path", id: "/Users/memmy/paper.pdf", label: "paper.pdf" },
+        { kind: "kb", id: "kb-1", label: "研究资料" }
+      ]
+    });
   });
 });
