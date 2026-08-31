@@ -12,6 +12,7 @@ import {
   type MemmyAgentProject,
   type MemmyAgentSessionSummary,
   type MemmyAgentSlashCommand,
+  type WorkspaceFilesListing,
   type AgentTurnSource,
   type MemmyAgentUiLanguage,
   type MemmyAgentWebSocketConnection,
@@ -24,6 +25,7 @@ import { setAnalyticsModelSource } from "../analytics/analytics-context.js";
 import { buildOnboardingActivationEvent } from "../analytics/onboarding-analytics.js";
 import { useAnalytics } from "../analytics/use-analytics.js";
 import { AgentModelSelector } from "../components/agent-model-selector.js";
+import { WorkspacePreviewPane, type WorkspacePreviewContent } from "../components/workspace-preview-pane.js";
 import { Memmy } from "../components/mascot/memmy.js";
 import { Select } from "../components/Select.js";
 import { formatMessage, type MessageKey, type MessageValues, zhCNMessages } from "../i18n/messages.js";
@@ -94,7 +96,13 @@ import { HistoryDagPanel, type HistoryDagPanelState } from "./history-dag-panel.
 import { LlmProviderLogo } from "./llm-provider-logo.js";
 import { Mic, Pause, Plus, Send } from "./memory/memory-prototype-icons.js";
 import { resolveWorkspaceEnvironmentScope, useWorkspaceEnvironment } from "./use-workspace-environment.js";
-import { ArrowDown, Check, ChevronDown, Folder, Plus as LucidePlus, RotateCw, SlidersHorizontal, Target, X } from "lucide-react";
+import { ArrowDown, Check, ChevronDown, Folder, PanelRight, Plus as LucidePlus, RotateCw, Scale, SlidersHorizontal, SquareSlash, Target, X } from "lucide-react";
+import {
+  LEGAL_DIAGNOSIS_COMMAND,
+  isLegalDiagnosisCommand,
+  stripLegalDiagnosisCommand,
+  writeLegalDiagnosisPrompt
+} from "./labor-diagnostic-model.js";
 
 export { agentChatScopeKey, updateComposerDraftForScope };
 export { hydrateAgentThreadInBackground };
@@ -106,6 +114,10 @@ const NEW_TASK_MODEL_SCOPE_KEY = "draft-new-task";
 const COMPOSER_MEDIA_STRIP_STYLE = { maxHeight: "min(7.5rem, 28vh)" } satisfies CSSProperties;
 const AGENT_WS_SAFE_FRAME_BYTES = 1024 * 1024;
 const COMPOSER_HEIGHT_EPSILON = 2;
+const WORKSPACE_TEXT_PREVIEW_PATTERN = /\.(?:c|cc|cpp|css|csv|go|h|hpp|html?|ini|java|js|json|jsx|log|md|mjs|py|rb|rs|sh|sql|tex|toml|ts|tsx|txt|xml|ya?ml)$/i;
+const WORKSPACE_TEXT_PREVIEW_MAX_CHARS = 512 * 1024;
+const AGENT_WORKSPACE_MIN_WIDTH_PX = 640;
+const AGENT_PREVIEW_SPLIT_MIN_WIDTH_PX = 720;
 
 export function updateAgentComposerOverlayHeight(
   panel: HTMLElement,
@@ -352,6 +364,97 @@ export function isSingleLineComposerInput(element: HTMLTextAreaElement): boolean
   return element.scrollHeight <= singleLineHeight + COMPOSER_HEIGHT_EPSILON;
 }
 
+export interface ComposerTextEdit {
+  value: string;
+  caret: number;
+}
+
+export interface ComposerFolderReference {
+  id: string;
+  label: string;
+  fileCount: number;
+  totalBytes: number;
+}
+
+/** Resolves the selected folder root from a webkitdirectory file batch. */
+export function composerFolderReferenceFromFiles(
+  files: File[],
+  resolvePath?: (file: File) => string
+): ComposerFolderReference | null {
+  const first = files[0];
+  if (!first) return null;
+  const relativePath = first.webkitRelativePath.replace(/\\/g, "/");
+  const rootName = relativePath.split("/")[0] || first.name;
+  const fullPath = (resolvePath?.(first) || first.name).replace(/\\/g, "/");
+  const rootPath = relativePath && fullPath.endsWith(relativePath)
+    ? `${fullPath.slice(0, -relativePath.length)}${rootName}`
+    : rootName;
+  return {
+    id: rootPath,
+    label: `${rootName}/`,
+    fileCount: files.length,
+    totalBytes: files.reduce((total, file) => total + file.size, 0)
+  };
+}
+
+/** Adds explicit user-selected folder paths to the Agent-only message context. */
+export function appendComposerFolderContext(
+  content: string,
+  references: ComposerFolderReference[]
+): string {
+  if (!references.length) return content;
+  const prefix = content.trimEnd();
+  const folderBlock = [
+    "<user_selected_folders>",
+    ...references.map((reference) => JSON.stringify(reference.id)),
+    "</user_selected_folders>"
+  ].join("\n");
+  return prefix ? `${prefix}\n\n${folderBlock}` : folderBlock;
+}
+
+/** Inserts a selected capability at the current textarea selection. */
+export function insertCapabilityAtSelection(
+  input: string,
+  command: string,
+  selectionStart: number,
+  selectionEnd = selectionStart
+): ComposerTextEdit {
+  const start = Math.max(0, Math.min(selectionStart, input.length));
+  const end = Math.max(start, Math.min(selectionEnd, input.length));
+  const before = input.slice(0, start);
+  const after = input.slice(end);
+  const leadingSpace = before && !/\s$/.test(before) ? "  " : "";
+  const trailingSpace = /^\s/.test(after) ? " " : "  ";
+  const insertion = `${leadingSpace}${command}${trailingSpace}`;
+  return {
+    value: `${before}${insertion}${after}`,
+    caret: before.length + insertion.length
+  };
+}
+
+/** Replaces only the slash query immediately before the caret. */
+export function replaceSlashQueryAtSelection(
+  input: string,
+  command: string,
+  selectionStart: number,
+  selectionEnd = selectionStart,
+  appendSpace = true
+): ComposerTextEdit {
+  const start = Math.max(0, Math.min(selectionStart, input.length));
+  const end = Math.max(start, Math.min(selectionEnd, input.length));
+  const beforeCaret = input.slice(0, start);
+  const match = /(^|\s)\/[^\s/]*$/.exec(beforeCaret);
+  if (!match) return insertCapabilityAtSelection(input, command, start, end);
+  const queryStart = (match.index ?? 0) + (match[1]?.length ?? 0);
+  const before = input.slice(0, queryStart);
+  const after = input.slice(end);
+  const suffix = appendSpace ? (/^\s/.test(after) ? " " : "  ") : "";
+  return {
+    value: `${before}${command}${suffix}${after}`,
+    caret: before.length + command.length + suffix.length
+  };
+}
+
 export function isAgentConversationAtBottom(element: Pick<HTMLElement, "scrollTop" | "scrollHeight" | "clientHeight">): boolean {
   return element.scrollTop + element.clientHeight >= element.scrollHeight - AGENT_CONVERSATION_BOTTOM_EPSILON_PX;
 }
@@ -419,6 +522,30 @@ export function ComposerMediaPreviewStrip(props: {
         />
       )}
     </>
+  );
+}
+
+export function ComposerFolderPreviewStrip(props: {
+  references: ComposerFolderReference[];
+  onRemove: (id: string) => void;
+}) {
+  const { t } = useTranslation();
+  if (!props.references.length) return null;
+  return (
+    <div className="composer-media-preview-strip" aria-label={t("home.quick.folderSelected")}>
+      {props.references.map((reference) => (
+        <AgentAttachmentCard
+          key={reference.id}
+          kind="file"
+          name={reference.label}
+          subline={`${t("home.quick.folderSelected")} · ${t("home.quick.folderSummary", { count: reference.fileCount })}`}
+          title={reference.id}
+          removable
+          removeLabel={t("common.remove")}
+          onRemove={() => props.onRemove(reference.id)}
+        />
+      ))}
+    </div>
   );
 }
 
@@ -841,6 +968,7 @@ export function HomePage() {
   const slashCommandsRetryTimerRef = useRef<number | null>(null);
   const slashCommandsAttemptRef = useRef(0);
   const [slashMenuDismissed, setSlashMenuDismissed] = useState(false);
+  const [slashPickerOpen, setSlashPickerOpen] = useState(false);
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
   const [selectedComposerCommandsByScope, setSelectedComposerCommandsByScope] = useState<Record<string, typeof COMPOSER_GOAL_COMMAND>>({});
   const [recentSlashCommands, setRecentSlashCommands] = useState<string[]>(() => readRecentSlashCommands());
@@ -848,6 +976,8 @@ export function HomePage() {
   const [lastCompactionPanel, setLastCompactionPanel] = useState<StatusPanelState>({ open: false });
   const [historyDagPanel, setHistoryDagPanel] = useState<HistoryDagPanelState>({ open: false });
   const [environmentPanelOpen, setEnvironmentPanelOpen] = useState(false);
+  const [previewPanelOpen, setPreviewPanelOpen] = useState(false);
+  const [previewPanelWidth, setPreviewPanelWidth] = useState(520);
   const [isCreatingChat, setIsCreatingChat] = useState(false);
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
   const [projectPickerOperationId, setProjectPickerOperationId] = useState<string | null>(null);
@@ -858,10 +988,14 @@ export function HomePage() {
     readFirstEncounterRelayReadyChat(typeof window === "undefined" ? undefined : window.sessionStorage)
   ));
   const [isComposerSingleLine, setIsComposerSingleLine] = useState(true);
+  const [folderReferencesByScope, setFolderReferencesByScope] = useState<Record<string, ComposerFolderReference[]>>({});
   const composerDrafts = state.agent.composerDraftsByScope;
   const pendingAttachmentsByScope = state.agent.composerPendingAttachmentsByScope;
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const composerAttachMenuRef = useRef<HTMLDetailsElement | null>(null);
+  const composerCapabilityMenuRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const folderInputRef = useRef<HTMLInputElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const conversationPanelRef = useRef<HTMLElement | null>(null);
   const composerOverlayRef = useRef<HTMLDivElement | null>(null);
@@ -885,6 +1019,31 @@ export function HomePage() {
   const queueSteerLocksRef = useRef<Set<string>>(new Set());
   const draftTargetRevisionRef = useRef(state.agent.draftTargetRevisionByScope);
   draftTargetRevisionRef.current = state.agent.draftTargetRevisionByScope;
+  useEffect(() => {
+    const closeOnPointer = (event: globalThis.PointerEvent) => {
+      const attachMenu = composerAttachMenuRef.current;
+      if (attachMenu?.open && !attachMenu.contains(event.target as Node)) {
+        attachMenu.removeAttribute("open");
+      }
+      if (!composerCapabilityMenuRef.current?.contains(event.target as Node)) {
+        setSlashPickerOpen(false);
+        setSlashMenuDismissed(true);
+      }
+    };
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") {
+        composerAttachMenuRef.current?.removeAttribute("open");
+        setSlashPickerOpen(false);
+        setSlashMenuDismissed(true);
+      }
+    };
+    document.addEventListener("pointerdown", closeOnPointer);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnPointer);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [slashPickerOpen]);
   const asrRecorder = useAsrRecorder(clients?.asr, { emptyAudioMessage: t("home.asrEmptyAudio") });
   const chatScopeKey = agentChatScopeKey(state.agent.currentChatId, state.agent.newChatRequestId);
   const modelSelectionScopeKey = state.agent.currentChatId ?? NEW_TASK_MODEL_SCOPE_KEY;
@@ -909,14 +1068,56 @@ export function HomePage() {
   const selectedComposerCommand = composerCommandDraft.command;
   const composerInput = composerCommandDraft.text;
   const pendingAttachments = pendingAttachmentsByScope[chatScopeKey] ?? [];
+  const folderReferences = folderReferencesByScope[chatScopeKey] ?? [];
   const draftTarget = state.agent.draftTargetsByScope[chatScopeKey] ?? { kind: "standalone" as const };
   const selectedDraftProject = draftTarget.kind === "project"
     ? state.agent.projects.find((project) => project.id === draftTarget.projectId) ?? null
     : null;
+  const activeTask = state.agent.currentSessionKey
+    ? state.agent.tasks.find((task) => task.sessionKey === state.agent.currentSessionKey) ?? null
+    : state.agent.currentChatId
+      ? state.agent.tasks.find((task) => task.chatId === state.agent.currentChatId) ?? null
+      : null;
+  const previewSessionKey = state.agent.currentSessionKey ?? activeTask?.sessionKey ?? null;
+  const activeSession = previewSessionKey
+    ? state.agent.sessions.find((session) => session.key === previewSessionKey) ?? null
+    : null;
+  const activeProjectId = activeSession?.projectId ?? activeTask?.projectId ?? null;
+  const activeProject = activeProjectId
+    ? state.agent.projects.find((project) => project.id === activeProjectId) ?? null
+    : null;
+  const previewRootLabel = activeProject?.name
+    ?? activeTask?.title
+    ?? t("workspacePreview.taskFolder");
   const environmentScope = resolveWorkspaceEnvironmentScope(
     state.agent.currentSessionKey,
     selectedDraftProject?.id ?? null,
   );
+  const loadPreviewDirectory = useCallback((sessionKey: string, relativePath: string): Promise<WorkspaceFilesListing> => {
+    const client = clients?.memmyAgent;
+    if (!client) return Promise.reject(new Error("agent_client_unavailable"));
+    return client.listWorkspaceFiles(sessionKey, relativePath);
+  }, [clients?.memmyAgent]);
+  const loadWorkspaceFilePreview = useCallback(async (relativePath: string): Promise<WorkspacePreviewContent | null> => {
+    const client = clients?.memmyAgent;
+    if (!client || !previewSessionKey) return null;
+    const artifact = await client.resolveArtifact(relativePath, previewSessionKey);
+    const extension = artifact.name.includes(".") ? artifact.name.split(".").pop()?.toUpperCase() ?? "" : "";
+    if (artifact.media_url && WORKSPACE_TEXT_PREVIEW_PATTERN.test(artifact.name)) {
+      const response = await fetch(artifact.media_url);
+      if (response.ok) {
+        const text = (await response.text()).slice(0, WORKSPACE_TEXT_PREVIEW_MAX_CHARS);
+        return { title: artifact.name, sections: [{ heading: extension || t("common.preview"), body: text || artifact.path }] };
+      }
+    }
+    return {
+      title: artifact.name,
+      sections: [{
+        heading: extension || t("common.preview"),
+        body: `${t("workspacePreview.binaryUnavailable")}\n\n${artifact.path}`
+      }]
+    };
+  }, [clients?.memmyAgent, previewSessionKey, t]);
   const currentSessionProjectBlocked = state.agent.projectRegistryState === "corrupt"
     && Boolean(
       state.agent.currentSessionKey
@@ -950,11 +1151,16 @@ export function HomePage() {
     && !currentQueuedMessages.some((item) => item.status === "steering")
   );
   const hasActiveConversation = hasActiveAgentConversation(state.agent.currentChatId, state.agent.messages.length);
+  const canPreviewWorkspace = hasActiveConversation && Boolean(previewSessionKey);
+  const isPreviewPanelOpen = previewPanelOpen && canPreviewWorkspace;
   const activeConversationTitle = state.agent.currentSessionKey
     ? state.agent.tasks.find((task) => task.sessionKey === state.agent.currentSessionKey)?.title.trim() || t("home.title")
     : t("home.title");
   const activeImTitleDisplay = imChannelTitleDisplay(activeConversationTitle);
   const activeConversationTitleDisplay = formatConversationTitleForDisplay(activeImTitleDisplay?.title ?? activeConversationTitle);
+  useEffect(() => {
+    if (!canPreviewWorkspace) setPreviewPanelOpen(false);
+  }, [canPreviewWorkspace]);
   const sessionArtifactClient = useMemo(() => {
     const client = clients?.memmyAgent;
     const sessionKey = state.agent.currentSessionKey;
@@ -1511,10 +1717,23 @@ export function HomePage() {
     argHint: "",
     synthetic: true
   };
-  const slashQuery = slashMenuDismissed ? null : slashQueryFromInput(composerInput);
+  const legalDiagnosisSlashCommand: SlashCommandPaletteItem = {
+    command: LEGAL_DIAGNOSIS_COMMAND,
+    title: t("home.capability.legalDiagnosis"),
+    description: t("home.capability.legalDiagnosisHint"),
+    icon: "book-open",
+    argHint: t("home.capability.legalDiagnosisArgHint"),
+    synthetic: true
+  };
+  const slashQuery = slashMenuDismissed
+    ? null
+    : slashPickerOpen
+      ? ""
+      : slashQueryFromInput(composerInput);
   const localizedSlashCommands = localizeSlashCommands(slashCommands, language, t);
   const slashCommandsWithLocal = [
     lastCompactionSlashCommand,
+    legalDiagnosisSlashCommand,
     ...localizedSlashCommands.filter((command) => command.command !== "/last-compaction")
   ];
   const visibleSlashCommands = buildVisibleSlashCommands(slashCommandsWithLocal, state.agent.isSending, stopSlashCommand);
@@ -1543,19 +1762,22 @@ export function HomePage() {
   const isAccountMode = state.bootstrap?.app.userMode === "account";
   const sanitizePlatformApiErrors = isAccountMode;
   const hasBlockedPendingMedia = pendingAttachments.some((item) => item.status !== "ready");
-  const hasComposerPayload = Boolean(input.trim() || pendingAttachments.some((item) => item.status === "ready"));
-  const hasComposerIntent = Boolean(input.trim() || pendingAttachments.length > 0);
+  const hasComposerPayload = Boolean(input.trim() || folderReferences.length || pendingAttachments.some((item) => item.status === "ready"));
+  const hasComposerIntent = Boolean(input.trim() || folderReferences.length || pendingAttachments.length > 0);
   const stopInFlight = state.agent.currentChatId ? Boolean(state.agent.stopInFlightByChatId[state.agent.currentChatId]) : false;
-  const composerSendDisabled = stopInFlight
-    || !hasComposerPayload
-    || hasBlockedPendingMedia
-    || !connection
-    || isCreatingChat
-    || messageSendInFlight
-    || currentSessionProjectBlocked
-    || draftProjectBlocked
-    || state.agent.connectionStatus !== "connected"
-    || state.agent.recoveringGeneration !== null;
+  const isLocalWorkflowCommand = /(?:^|\s)\/legal-diagnosis(?=\s|$)/i.test(input);
+  const composerSendDisabled = isLocalWorkflowCommand
+    ? false
+    : stopInFlight
+      || !hasComposerPayload
+      || hasBlockedPendingMedia
+      || !connection
+      || isCreatingChat
+      || messageSendInFlight
+      || currentSessionProjectBlocked
+      || draftProjectBlocked
+      || state.agent.connectionStatus !== "connected"
+      || state.agent.recoveringGeneration !== null;
   const composerStopDisabled = stopInFlight || Boolean(isCurrentGoalActive && goalMutationPending);
   const composerPrimaryAction = agentComposerPrimaryAction({
     isRunning: isCurrentAgentRunning,
@@ -1730,6 +1952,16 @@ export function HomePage() {
       resolvedConversationModel.candidateId
     ));
     const target: WebuiSessionTarget | null = state.agent.currentChatId ? null : draftTarget;
+    const contentWithFolderContext = appendComposerFolderContext(input, folderReferences);
+    const visibleComposerText = selectedComposerCommand ? composerInput : input;
+    const folderDisplayText = folderReferences
+      .map((reference) => `${t("home.quick.folderSelected")}：${reference.label}`)
+      .join("\n");
+    const displayContent = folderReferences.length
+      ? [visibleComposerText.trim(), folderDisplayText].filter(Boolean).join("\n")
+      : selectedComposerCommand
+        ? composerInput
+        : undefined;
     try {
       const submitted = await submitAgentComposerMessage({
         chatId: state.agent.currentChatId,
@@ -1737,8 +1969,8 @@ export function HomePage() {
         clientRequestId,
         connection,
         ensureChatSubscription,
-        content: input,
-        displayContent: selectedComposerCommand ? composerInput : undefined,
+        content: contentWithFolderContext,
+        displayContent,
         language,
         pendingAttachments,
         uploadAgentMedia: (attachments) => clients!.memmyAgent.uploadAgentMedia(attachments),
@@ -1924,7 +2156,20 @@ export function HomePage() {
     }
   }
 
+  function launchLegalDiagnosis(rawText = composerInput) {
+    rememberSlashCommand(LEGAL_DIAGNOSIS_COMMAND);
+    writeLegalDiagnosisPrompt(stripLegalDiagnosisCommand(rawText));
+    setCurrentComposerDraft("");
+    setSlashMenuDismissed(true);
+    setSlashPickerOpen(false);
+    dispatch(appActions.navigate("/legal-diagnosis"));
+  }
+
   function runExactLocalSlashCommand(command: string): boolean {
+    if (isLegalDiagnosisCommand(command)) {
+      launchLegalDiagnosis(command);
+      return true;
+    }
     const normalized = command.trim().toLowerCase();
     if (pendingAttachments.length > 0) return false;
     if (normalized === "/last-compaction") {
@@ -2098,7 +2343,9 @@ export function HomePage() {
    * @param value The latest input box content.
    */
   function updateComposerInput(value: string) {
+    composerAttachMenuRef.current?.removeAttribute("open");
     setCurrentComposerDraft(buildComposerCommandDraft(selectedComposerCommand, value));
+    setSlashPickerOpen(false);
     setSlashMenuDismissed(false);
     setSelectedCommandIndex(0);
     if (
@@ -2170,6 +2417,12 @@ export function HomePage() {
     delete nextPendingAttachments[scopeKey];
     composerDraftsRef.current = nextDrafts;
     pendingAttachmentsRef.current = nextPendingAttachments;
+    setFolderReferencesByScope((current) => {
+      if (!(scopeKey in current)) return current;
+      const next = { ...current };
+      delete next[scopeKey];
+      return next;
+    });
     dispatch(agentActions.composerScopeCleared(scopeKey));
     resetComposerHeight();
   }
@@ -2182,6 +2435,7 @@ export function HomePage() {
 
   function resetTransientConversationUi() {
     setSlashMenuDismissed(true);
+    setSlashPickerOpen(false);
     setSelectedCommandIndex(0);
     setStatusPanel({ open: false });
     closeLastCompactionPanel();
@@ -2310,6 +2564,10 @@ export function HomePage() {
   }
 
   function selectSlashCommand(command: SlashCommandPaletteItem) {
+    const selectedFromCapabilityPicker = slashPickerOpen;
+    const selectionStart = inputRef.current?.selectionStart ?? composerInput.length;
+    const selectionEnd = inputRef.current?.selectionEnd ?? selectionStart;
+    setSlashPickerOpen(false);
     if (command.command === "/stop") {
       if (state.agent.isSending) {
         stopCurrentTurn();
@@ -2343,6 +2601,13 @@ export function HomePage() {
       return;
     }
 
+    if (command.command === LEGAL_DIAGNOSIS_COMMAND) {
+      launchLegalDiagnosis(composerInput.includes(LEGAL_DIAGNOSIS_COMMAND)
+        ? composerInput
+        : `${LEGAL_DIAGNOSIS_COMMAND}  ${composerInput}`.trim());
+      return;
+    }
+
     if (command.command === COMPOSER_GOAL_COMMAND) {
       rememberSlashCommand(command.command);
       setSelectedComposerCommandForScope(chatScopeKey, COMPOSER_GOAL_COMMAND);
@@ -2369,9 +2634,21 @@ export function HomePage() {
     }
 
     rememberSlashCommand(command.command);
-    setCurrentComposerDraft(command.argHint ? `${command.command} ` : command.command);
+    const edit = selectedFromCapabilityPicker
+      ? insertCapabilityAtSelection(composerInput, command.command, selectionStart, selectionEnd)
+      : replaceSlashQueryAtSelection(
+          composerInput,
+          command.command,
+          selectionStart,
+          selectionEnd,
+          Boolean(command.argHint)
+        );
+    setCurrentComposerDraft(edit.value);
     setSlashMenuDismissed(true);
-    inputRef.current?.focus();
+    window.requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      inputRef.current?.setSelectionRange(edit.caret, edit.caret);
+    });
   }
 
   /**
@@ -2379,6 +2656,26 @@ export function HomePage() {
    */
   function openMediaFilePicker() {
     fileInputRef.current?.click();
+  }
+
+  function openFolderPicker() {
+    folderInputRef.current?.click();
+  }
+
+  function toggleCapabilityPicker() {
+    composerAttachMenuRef.current?.removeAttribute("open");
+    setProjectPickerOpen(false);
+    setSlashMenuDismissed(false);
+    setSlashPickerOpen((open) => !open);
+    setSelectedCommandIndex(0);
+    if (
+      clients?.memmyAgent
+      && slashCommandsRef.current.length === 0
+      && !slashCommandsInFlightRef.current
+    ) {
+      loadSlashCommands({ resetAttempts: true });
+    }
+    inputRef.current?.focus();
   }
 
   /**
@@ -2517,6 +2814,40 @@ export function HomePage() {
     }
   }
 
+  function selectFolder(event: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files ?? []);
+    const reference = composerFolderReferenceFromFiles(files, (file) => {
+      try {
+        return window.memmy?.getPathForFile(file) || file.name;
+      } catch {
+        return file.name;
+      }
+    });
+    if (reference) {
+      setFolderReferencesByScope((current) => {
+        const references = current[chatScopeKey] ?? [];
+        const nextReferences = references.some((item) => item.id === reference.id)
+          ? references
+          : [...references, reference];
+        return nextReferences === references ? current : { ...current, [chatScopeKey]: nextReferences };
+      });
+    }
+    event.target.value = "";
+    inputRef.current?.focus();
+  }
+
+  function removeFolderReference(id: string) {
+    setFolderReferencesByScope((current) => {
+      const nextReferences = (current[chatScopeKey] ?? []).filter((reference) => reference.id !== id);
+      if (nextReferences.length === (current[chatScopeKey] ?? []).length) return current;
+      const next = { ...current };
+      if (nextReferences.length) next[chatScopeKey] = nextReferences;
+      else delete next[chatScopeKey];
+      return next;
+    });
+    inputRef.current?.focus();
+  }
+
   function handleComposerPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
     const files = clipboardImageFilesFromDataTransfer(event.clipboardData);
     if (!files.length) {
@@ -2623,6 +2954,71 @@ export function HomePage() {
     });
   }
 
+  function renderComposerLeadingActions() {
+    return (
+      <>
+        <details ref={composerAttachMenuRef} className="agent-composer-attach-menu">
+          <summary
+            aria-label={t("home.quick.attach")}
+            title={t("home.quick.attachHint")}
+            className="composer-action-btn"
+            onClick={() => {
+              setSlashPickerOpen(false);
+              setSlashMenuDismissed(true);
+              setProjectPickerOpen(false);
+            }}
+          >
+            <Plus size={15} strokeWidth={2} />
+          </summary>
+          <div className="agent-composer-attach-menu__popover" role="menu">
+            <button
+              type="button"
+              role="menuitem"
+              onClick={(event) => {
+                event.currentTarget.closest("details")?.removeAttribute("open");
+                openMediaFilePicker();
+              }}
+            >
+              {t("home.quick.uploadFile")}
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={(event) => {
+                event.currentTarget.closest("details")?.removeAttribute("open");
+                openFolderPicker();
+              }}
+            >
+              {t("home.quick.uploadFolder")}
+            </button>
+          </div>
+        </details>
+        <div ref={composerCapabilityMenuRef} className="composer-quick-actions__anchor">
+          <button
+            type="button"
+            aria-label={t("home.quick.capability")}
+            title={t("home.quick.capabilityHint")}
+            aria-expanded={slashPickerOpen}
+            onClick={toggleCapabilityPicker}
+            className={`composer-action-btn${slashPickerOpen ? " composer-action-btn--active" : ""}`}
+          >
+            <SquareSlash size={15} strokeWidth={2} />
+          </button>
+          {slashMenuOpen && slashPickerOpen ? (
+            <div className="composer-quick-actions__popover composer-quick-actions__popover--slash">
+              <AgentCommandPalette
+                commands={filteredSlashCommands}
+                heading={t("home.commandPalette.commands")}
+                selectedIndex={selectedCommandIndex}
+                onSelect={selectSlashCommand}
+              />
+            </div>
+          ) : null}
+        </div>
+      </>
+    );
+  }
+
   const environmentPanel = environmentPanelOpen && environmentScope ? (
     <AgentEnvironmentPanel
       client={clients?.memmyAgent ?? null}
@@ -2636,33 +3032,73 @@ export function HomePage() {
     />
   ) : null;
 
+  const previewToggle = canPreviewWorkspace ? (
+    <button
+      type="button"
+      className={`agent-preview-toggle${isPreviewPanelOpen ? " agent-preview-toggle--active" : ""}`}
+      aria-label={t("common.preview")}
+      aria-pressed={isPreviewPanelOpen}
+      title={t("common.preview")}
+      onClick={() => setPreviewPanelOpen((open) => !open)}
+    >
+      <PanelRight size={15} aria-hidden="true" />
+    </button>
+  ) : null;
+
+  const previewPanel = isPreviewPanelOpen && previewSessionKey ? (
+    <WorkspacePreviewPane
+      key={previewSessionKey}
+      sessionKey={previewSessionKey}
+      rootLabel={previewRootLabel}
+      loadDirectory={loadPreviewDirectory}
+      loadPreview={loadWorkspaceFilePreview}
+      refreshKey={`${currentHistoryVersion}:${isCurrentAgentRunning ? "running" : "idle"}`}
+      onWidthChange={setPreviewPanelWidth}
+      toolbarEnd={previewToggle}
+      emptyDetail={previewRootLabel}
+    />
+  ) : null;
+
   return (
     <AppFrame
       title={t("home.title")}
+      minimumContentWidth={isPreviewPanelOpen ? AGENT_PREVIEW_SPLIT_MIN_WIDTH_PX : AGENT_WORKSPACE_MIN_WIDTH_PX}
+      topBarStyle={isPreviewPanelOpen ? { right: `${previewPanelWidth}px` } : undefined}
       topBar={hasActiveConversation || environmentScope ? (
-        <div className="agent-conversation-topbar">
+        <div
+          className={`agent-conversation-topbar${isPreviewPanelOpen ? " agent-conversation-topbar--preview-open" : ""}`}
+          style={{ "--agent-preview-panel-width": `${previewPanelWidth}px` } as CSSProperties}
+        >
           <h1 className="agent-conversation-title" title={hasActiveConversation ? activeConversationTitle : selectedDraftProject?.name}>
             <span className="agent-conversation-title__text">
               {hasActiveConversation ? activeConversationTitleDisplay : selectedDraftProject?.name}
             </span>
             {hasActiveConversation && activeImTitleDisplay ? <ImChannelTitleIcon slug={activeImTitleDisplay.slug} name={activeImTitleDisplay.channelName} /> : null}
           </h1>
-          <button
-            type="button"
-            className={`agent-environment-toggle${environmentPanelOpen ? " agent-environment-toggle--active" : ""}`}
-            data-agent-environment-toggle
-            aria-label={t("home.environment.title")}
-            aria-pressed={environmentPanelOpen}
-            title={t("home.environment.title")}
-            onClick={() => setEnvironmentPanelOpen((open) => !open)}
-          >
-            <SlidersHorizontal size={16} aria-hidden="true" />
-          </button>
+          <div className="agent-conversation-topbar__actions">
+            {environmentScope ? (
+              <button
+                type="button"
+                className={`agent-environment-toggle${environmentPanelOpen ? " agent-environment-toggle--active" : ""}`}
+                data-agent-environment-toggle
+                aria-label={t("home.environment.title")}
+                aria-pressed={environmentPanelOpen}
+                title={t("home.environment.title")}
+                onClick={() => setEnvironmentPanelOpen((open) => !open)}
+              >
+                <SlidersHorizontal size={15} aria-hidden="true" />
+              </button>
+            ) : null}
+            {!isPreviewPanelOpen ? previewToggle : null}
+          </div>
         </div>
       ) : null}
-      topBarBorder={Boolean(hasActiveConversation || environmentScope)}
+      topBarBorder={Boolean(hasActiveConversation || environmentScope) && !isPreviewPanelOpen}
     >
-      <div className={`agent-workspace-layout${environmentPanelOpen ? " agent-workspace-layout--environment-open" : ""}`}>
+      <div
+        className={`agent-workspace-layout${environmentPanelOpen ? " agent-workspace-layout--environment-open" : ""}${isPreviewPanelOpen ? " agent-workspace-layout--preview-open" : ""}`}
+        style={{ "--agent-preview-panel-width": `${previewPanelWidth}px` } as CSSProperties}
+      >
         {!hasActiveConversation ? (
         <section className="app-frame-page-content home-empty-screen flex flex-col items-center justify-center h-full">
           <div className="text-center mb-8">
@@ -2679,7 +3115,7 @@ export function HomePage() {
                 onDragOver={handleComposerDragOver}
                 onDrop={handleComposerDrop}
               >
-                {slashMenuOpen && (
+                {slashMenuOpen && !slashPickerOpen && (
                   <div className="absolute left-0 bottom-full mb-3 z-40" style={{ width: "min(448px, 100%)" }}>
                     <AgentCommandPalette commands={filteredSlashCommands} heading={t("home.commandPalette.commands")} selectedIndex={selectedCommandIndex} onSelect={selectSlashCommand} />
                   </div>
@@ -2689,6 +3125,7 @@ export function HomePage() {
                     <AgentStatusPanel state={lastCompactionPanel} closeLabel={t("common.close")} loadingLabel={t("home.agent.connecting")} onClose={closeLastCompactionPanel} />
                   </div>
                 )}
+                <ComposerFolderPreviewStrip references={folderReferences} onRemove={removeFolderReference} />
                 <ComposerMediaPreviewStrip
                   items={pendingAttachments}
                   onRemove={removePendingMedia}
@@ -2719,6 +3156,9 @@ export function HomePage() {
                   onPaste={handleComposerPaste}
                   className="w-full px-5 pt-4 pb-12 text-sm resize-none focus:outline-none rounded-card-lg bg-background-paper placeholder:text-text-ink/40"
                 />
+                <div className="composer-actions absolute bottom-3 left-4 z-50">
+                  {renderComposerLeadingActions()}
+                </div>
                 <div className="composer-actions absolute bottom-3 right-4 z-50">
                   <AgentModelSelector
                     mode={modelWorkspaceMode}
@@ -2726,15 +3166,6 @@ export function HomePage() {
                     disabled={isCurrentAgentRunning || isCreatingChat || messageSendInFlight}
                     seedConfig={state.modelConfig}
                   />
-                  <button
-                    type="button"
-                    aria-label={t("home.media.menu")}
-                    title={t("home.media.menu")}
-                    onClick={openMediaFilePicker}
-                    className="composer-action-btn"
-                  >
-                    <Plus size={15} strokeWidth={2} />
-                  </button>
                   <button
                     type="button"
                     aria-label={t("home.voiceInput")}
@@ -2778,11 +3209,46 @@ export function HomePage() {
                 />
               </div>
             </div>
+            <div className="home-capability-strip" aria-label={t("home.quick.capability")}>
+              <button
+                type="button"
+                className="home-capability-card"
+                onClick={() => launchLegalDiagnosis(LEGAL_DIAGNOSIS_COMMAND)}
+              >
+                <span className="home-capability-card__icon home-capability-card__icon--legal" aria-hidden="true">
+                  <Scale size={14} />
+                </span>
+                <strong>{t("home.capability.legalDiagnosis")}</strong>
+                <small>{t("home.capability.legalDiagnosisHint")}</small>
+              </button>
+              <button
+                type="button"
+                className="home-capability-card"
+                onClick={toggleCapabilityPicker}
+              >
+                <span className="home-capability-card__icon home-capability-card__icon--more" aria-hidden="true">
+                  <SquareSlash size={14} />
+                </span>
+                <strong>{t("home.capability.more")}</strong>
+                <small>{t("home.capability.moreHint")}</small>
+              </button>
+            </div>
             <div className="home-empty-status-area">
               {statusText && <p className="text-center text-xs text-text-ink/45 mt-4">{statusText}</p>}
               <p className="text-center text-[11px] text-text-ink/40 mt-4">{t("home.notice")}</p>
             </div>
             <input ref={fileInputRef} type="file" accept={AGENT_MEDIA_ACCEPT} multiple hidden className="hidden" onChange={(event) => void selectMedia(event)} />
+            <input
+              ref={(node) => {
+                folderInputRef.current = node;
+                node?.setAttribute("webkitdirectory", "");
+              }}
+              type="file"
+              multiple
+              hidden
+              className="hidden"
+              onChange={selectFolder}
+            />
           </div>
         </section>
         ) : (
@@ -2832,7 +3298,7 @@ export function HomePage() {
           <div ref={composerOverlayRef} className="agent-conversation-composer">
             <div className="agent-conversation-content agent-conversation-content--composer max-w-3xl mx-auto">
               <div className="agent-composer-flow">
-                {slashMenuOpen && (
+                {slashMenuOpen && !slashPickerOpen && (
                   <div className="agent-composer-popover absolute left-0 bottom-full mb-3 z-40" style={{ width: "min(448px, 100%)" }}>
                     <AgentCommandPalette commands={filteredSlashCommands} heading={t("home.commandPalette.commands")} selectedIndex={selectedCommandIndex} onSelect={selectSlashCommand} />
                   </div>
@@ -2906,6 +3372,7 @@ export function HomePage() {
                     onDragOver={handleComposerDragOver}
                     onDrop={handleComposerDrop}
                   >
+                    <ComposerFolderPreviewStrip references={folderReferences} onRemove={removeFolderReference} />
                     <ComposerMediaPreviewStrip
                       items={pendingAttachments}
                       onRemove={removePendingMedia}
@@ -2927,7 +3394,8 @@ export function HomePage() {
                       className={`${isComposerSingleLine ? "agent-composer-input--single " : ""}agent-composer-input--conversation block w-full pl-4 py-3 text-sm resize-none focus:outline-none rounded-card-lg bg-background-paper placeholder:text-text-ink/40`}
                     />
                     <div className="agent-composer-toolbar">
-                      <div className="agent-composer-toolbar__leading">
+                      <div className="agent-composer-toolbar__leading gap-1">
+                        {renderComposerLeadingActions()}
                         {selectedComposerCommand ? (
                           <ComposerCommandChip
                             command={selectedComposerCommand}
@@ -2944,15 +3412,6 @@ export function HomePage() {
                           disabled={isCurrentAgentRunning || isCreatingChat || messageSendInFlight}
                           seedConfig={state.modelConfig}
                         />
-                        <button
-                          type="button"
-                          aria-label={t("home.media.menu")}
-                          title={t("home.media.menu")}
-                          onClick={openMediaFilePicker}
-                          className="composer-action-btn"
-                        >
-                          <Plus size={15} strokeWidth={2} />
-                        </button>
                         <button
                           type="button"
                           aria-label={t("home.voiceInput")}
@@ -2978,11 +3437,23 @@ export function HomePage() {
               </div>
               <p className="text-center text-[11px] text-text-ink/40 mt-2">{t("home.notice")}</p>
               <input ref={fileInputRef} type="file" accept={AGENT_MEDIA_ACCEPT} multiple hidden className="hidden" onChange={(event) => void selectMedia(event)} />
+              <input
+                ref={(node) => {
+                  folderInputRef.current = node;
+                  node?.setAttribute("webkitdirectory", "");
+                }}
+                type="file"
+                multiple
+                hidden
+                className="hidden"
+                onChange={selectFolder}
+              />
             </div>
           </div>
         </section>
         )}
         {environmentPanel}
+        {previewPanel}
       </div>
     </AppFrame>
   );

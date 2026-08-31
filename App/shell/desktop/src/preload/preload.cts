@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer }: typeof import("electron") = require("electron");
+const { contextBridge, ipcRenderer, webUtils }: typeof import("electron") = require("electron");
 type IpcRendererEvent = import("electron").IpcRendererEvent;
 type DesktopAppInfo = import("@memmy/desktop-interface").DesktopAppInfo;
 type DesktopUpdateCheckResult = import("@memmy/desktop-interface").DesktopUpdateCheckResult;
@@ -36,6 +36,7 @@ interface MemmyPreloadApi {
   openMailto(mailtoUrl: string): Promise<void>;
   copyImageToClipboard(request: DesktopImageActionRequest): Promise<void>;
   saveImage(request: DesktopImageActionRequest): Promise<DesktopImageSaveResult>;
+  getPathForFile(file: File): string;
   exportMemoryDatabase(): Promise<unknown>;
   installCliTools(): Promise<unknown>;
   restartMemoryService(): Promise<DesktopMemoryServiceRestartResult>;
@@ -166,6 +167,10 @@ const memmyPreloadApi: MemmyPreloadApi = {
 
   async saveImage(request: DesktopImageActionRequest): Promise<DesktopImageSaveResult> {
     return ipcRenderer.invoke("memmy:save-image", request);
+  },
+
+  getPathForFile(file: File): string {
+    return webUtils.getPathForFile(file);
   },
 
   async notifyTaskDone(payload: { title: string; body: string; silent: boolean }): Promise<void> {

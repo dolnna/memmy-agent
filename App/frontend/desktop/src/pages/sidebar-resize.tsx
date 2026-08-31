@@ -12,6 +12,11 @@ export interface ResizableSidebarOptions {
   defaultWidth: number;
   minWidth: number;
   maxWidth: number;
+  resizeDirection?: 1 | -1;
+}
+
+export interface CodexResizableSidebarConstraints {
+  maxWidth?: number;
 }
 
 export interface ResizableSidebarState {
@@ -41,12 +46,14 @@ export function useResizableSidebar(options: ResizableSidebarOptions): Resizable
     storageKey,
     defaultWidth,
     minWidth,
-    maxWidth
+    maxWidth,
+    resizeDirection = 1
   } = options;
-  const [width, setWidth] = useState(() => readStoredSidebarWidth(storageKey, defaultWidth, minWidth, maxWidth));
+  const [preferredWidth, setPreferredWidth] = useState(() => readStoredSidebarWidth(storageKey, defaultWidth, minWidth, maxWidth));
+  const width = clampSidebarWidth(preferredWidth, minWidth, maxWidth);
   const [dragState, setDragState] = useState<SidebarDragState | null>(null);
   const setClampedWidth = useCallback(
-    (nextWidth: number) => setWidth(clampSidebarWidth(nextWidth, minWidth, maxWidth)),
+    (nextWidth: number) => setPreferredWidth(clampSidebarWidth(nextWidth, minWidth, maxWidth)),
     [maxWidth, minWidth]
   );
   const beginResize = useCallback(
@@ -61,8 +68,8 @@ export function useResizableSidebar(options: ResizableSidebarOptions): Resizable
     [width]
   );
   const resizeBy = useCallback(
-    (delta: number) => setClampedWidth(width + delta),
-    [setClampedWidth, width]
+    (delta: number) => setClampedWidth(width + delta * resizeDirection),
+    [resizeDirection, setClampedWidth, width]
   );
   const sidebarStyle = useMemo<CSSProperties>(
     () => ({
@@ -75,12 +82,8 @@ export function useResizableSidebar(options: ResizableSidebarOptions): Resizable
   );
 
   useEffect(() => {
-    setClampedWidth(width);
-  }, [setClampedWidth, width]);
-
-  useEffect(() => {
-    writeStoredSidebarWidth(storageKey, width);
-  }, [storageKey, width]);
+    writeStoredSidebarWidth(storageKey, preferredWidth);
+  }, [preferredWidth, storageKey]);
 
   useEffect(() => {
     if (!dragState || typeof window === "undefined") {
@@ -95,7 +98,7 @@ export function useResizableSidebar(options: ResizableSidebarOptions): Resizable
     body.style.userSelect = "none";
 
     const handlePointerMove = (event: PointerEvent) => {
-      setClampedWidth(dragState.startWidth + event.clientX - dragState.startX);
+      setClampedWidth(dragState.startWidth + (event.clientX - dragState.startX) * resizeDirection);
     };
     const stopResize = () => setDragState(null);
 
@@ -110,7 +113,7 @@ export function useResizableSidebar(options: ResizableSidebarOptions): Resizable
       window.removeEventListener("pointerup", stopResize);
       window.removeEventListener("pointercancel", stopResize);
     };
-  }, [dragState, setClampedWidth]);
+  }, [dragState, resizeDirection, setClampedWidth]);
 
   return {
     width,
@@ -124,14 +127,30 @@ export function useResizableSidebar(options: ResizableSidebarOptions): Resizable
 }
 
 /** Handles use codex resizable sidebar. */
-export function useCodexResizableSidebar(storageKey: string): ResizableSidebarState {
+export function useCodexResizableSidebar(
+  storageKey: string,
+  constraints: CodexResizableSidebarConstraints = {}
+): ResizableSidebarState {
   const layout = useMemo(() => readCodexSidebarLayout(), []);
   return useResizableSidebar({
     storageKey,
     defaultWidth: layout.defaultWidth,
     minWidth: layout.minWidth,
-    maxWidth: layout.maxWidth
+    maxWidth: resolveConstrainedSidebarMaxWidth(
+      layout.minWidth,
+      layout.maxWidth,
+      constraints.maxWidth
+    )
   });
+}
+
+export function resolveConstrainedSidebarMaxWidth(
+  minWidth: number,
+  maxWidth: number,
+  requestedMaxWidth?: number
+): number {
+  const requested = Number.isFinite(requestedMaxWidth) ? requestedMaxWidth! : maxWidth;
+  return Math.max(minWidth, Math.min(maxWidth, requested));
 }
 
 /** Handles sidebar resize handle. */

@@ -18,7 +18,8 @@ export type AppRoutePath =
   | "/tools"
   | "/memory"
   | "/memory-sources"
-  | "/settings";
+  | "/settings"
+  | "/legal-diagnosis";
 
 const CURRENT_ROUTE_STORAGE_KEY = "memmy.currentRoute";
 export const FOCUSED_AGENT_CHAT_STORAGE_KEY = "memmy.focusSessionId";
@@ -54,7 +55,8 @@ export const routeTable: Record<AppRoutePath, AppRouteDefinition> = {
   "/tools": { path: "/tools", navKey: "nav.tools", requiresBootstrap: true },
   "/memory": { path: "/memory", navKey: "nav.memory", requiresBootstrap: true },
   "/memory-sources": { path: "/memory-sources", navKey: "nav.memory", requiresBootstrap: true },
-  "/settings": { path: "/settings", navKey: "nav.settings", requiresBootstrap: true }
+  "/settings": { path: "/settings", navKey: "nav.settings", requiresBootstrap: true },
+  "/legal-diagnosis": { path: "/legal-diagnosis", navKey: "nav.legalDiagnosis", requiresBootstrap: true }
 };
 
 /** Contract for resolve initial view input. */
@@ -642,7 +644,7 @@ function isAppRoutePath(value: string | null): value is AppRoutePath {
 }
 
 function isRestorableRoute(path: AppRoutePath): boolean {
-  return path === "/main" || path === "/pet" || path === "/tools" || path === "/memory" || path === "/memory-sources" || path === "/settings";
+  return path === "/main" || path === "/pet" || path === "/tools" || path === "/memory" || path === "/memory-sources" || path === "/settings" || path === "/legal-diagnosis";
 }
 
 function isPostOnboardingRoute(path: AppRoutePath): boolean {

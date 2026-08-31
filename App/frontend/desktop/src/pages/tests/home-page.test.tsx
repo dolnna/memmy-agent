@@ -22,12 +22,15 @@ import {
   agentErrorText,
   agentStatusText,
   agentChatScopeKey,
+  appendComposerFolderContext,
   attachmentFilesFromDataTransfer,
   buildComposerCommandDraft,
   clipboardImageFilesFromDataTransfer,
+  composerFolderReferenceFromFiles,
   dataTransferHasAttachmentFiles,
   hasActiveAgentConversation,
   hydrateAgentThreadInBackground,
+  insertCapabilityAtSelection,
   isAgentConversationAtBottom,
   isComposingKeyboardEvent,
   isSingleLineComposerInput,
@@ -38,6 +41,7 @@ import {
   requestNewSessionReset,
   requestAgentRestart,
   requestAgentStop,
+  replaceSlashQueryAtSelection,
   resolveComposerCommandDraft,
   shouldAcceptAgentStatusResult,
   submitAgentComposerMessage,
@@ -69,6 +73,47 @@ function mockCallOrder(fn: { mock: { invocationCallOrder: readonly number[] } },
 }
 
 describe("HomePage", () => {
+  it("inserts capability commands without discarding the existing draft", () => {
+    expect(insertCapabilityAtSelection("请分析这段录音", "/legal-diagnosis", 0)).toEqual({
+      value: "/legal-diagnosis  请分析这段录音",
+      caret: 18
+    });
+    expect(insertCapabilityAtSelection("请先分析，再输出", "/legal-diagnosis", 5, 7)).toEqual({
+      value: "请先分析，  /legal-diagnosis  出",
+      caret: 25
+    });
+    expect(replaceSlashQueryAtSelection("请先 /leg 再继续", "/legal-diagnosis", 7, 7, true)).toEqual({
+      value: "请先 /legal-diagnosis  再继续",
+      caret: 20
+    });
+  });
+
+  it("lets /legal-diagnosis send without an Agent websocket", () => {
+    const source = readFileSync(homePageSourcePath, "utf8");
+    expect(source).toContain("const isLocalWorkflowCommand = /(?:^|\\s)\\/legal-diagnosis(?=\\s|$)/i.test(input);");
+    expect(source).toContain("const composerSendDisabled = isLocalWorkflowCommand");
+  });
+
+  it("keeps selected folder paths in Agent context and exposes a readable folder chip", () => {
+    const testWindow = new Window();
+    const file = new testWindow.File(["policy"], "policy.md") as unknown as File;
+    Object.defineProperty(file, "webkitRelativePath", { value: "客户资料/reports/policy.md" });
+    const reference = composerFolderReferenceFromFiles(
+      [file],
+      () => "/Users/example/客户资料/reports/policy.md"
+    );
+
+    expect(reference).toEqual({
+      id: "/Users/example/客户资料",
+      label: "客户资料/",
+      fileCount: 1,
+      totalBytes: 6
+    });
+    expect(appendComposerFolderContext("生成诊断", [reference!])).toBe(
+      "生成诊断\n\n<user_selected_folders>\n\"/Users/example/客户资料\"\n</user_selected_folders>"
+    );
+  });
+
   it("allows Goal steering when source metadata is missing without opening TUI or IM turns", () => {
     expect(isSteerableCurrentTurn(null, true)).toBe(true);
     expect(isSteerableCurrentTurn(null, false)).toBe(false);
@@ -87,7 +132,10 @@ describe("HomePage", () => {
     );
 
     expect(html).toContain("分配一个任务或提问任何问题...");
-    expect(html).toContain("添加图片和文件");
+    expect(html).toContain("添加资料");
+    expect(html).toContain("上传文件");
+    expect(html).toContain("上传文件夹");
+    expect(html).toContain("能力");
     expect(html).toContain("语音输入");
     expect(html).toContain("发送");
     expect(html).toContain("Agent 正在连接");
@@ -173,7 +221,8 @@ describe("HomePage", () => {
     expect(filterGoalModeSlashCommands(commands, false).map((item) => item.command)).toEqual([
       "/last-compaction"
     ]);
-    expect(source).toContain("const slashQuery = slashMenuDismissed ? null : slashQueryFromInput(composerInput);");
+    expect(source).toContain("slashPickerOpen");
+    expect(source).toContain("slashQueryFromInput(composerInput)");
     expect(source).toContain("clearAuxiliarySlashQuery();");
     expect(source).toContain('setCurrentComposerDraft(buildComposerCommandDraft(selectedComposerCommand, ""));');
   });
@@ -262,7 +311,8 @@ describe("HomePage", () => {
     const source = readFileSync(homePageSourcePath, "utf8");
 
     expect(source).toContain("const slashMenuOpen = filteredSlashCommands.length > 0;");
-    expect(source.match(/\{slashMenuOpen && \(/g)).toHaveLength(2);
+    expect(source.match(/\{slashMenuOpen && !slashPickerOpen && \(/g)).toHaveLength(2);
+    expect(source).toContain("{slashMenuOpen && slashPickerOpen ? (");
     expect(source).toContain("const [lastCompactionPanel, setLastCompactionPanel] = useState<StatusPanelState>({ open: false });");
     expect(source).toContain("const lastCompactionSlashCommand: SlashCommandPaletteItem = {");
     expect(source).toContain('command: "/last-compaction"');
@@ -287,15 +337,38 @@ describe("HomePage", () => {
     expect(source).toContain("const activeImTitleDisplay = imChannelTitleDisplay(activeConversationTitle);");
     expect(source).toContain("formatConversationTitleForDisplay(activeImTitleDisplay?.title ?? activeConversationTitle)");
     expect(source).toContain("topBar={hasActiveConversation || environmentScope ? (");
-    expect(source).toContain('<div className="agent-conversation-topbar">');
+    expect(source).toContain('className={`agent-conversation-topbar${isPreviewPanelOpen ? " agent-conversation-topbar--preview-open" : ""}`}');
     expect(source).toContain('title={hasActiveConversation ? activeConversationTitle : selectedDraftProject?.name}');
     expect(source).toContain("{hasActiveConversation ? activeConversationTitleDisplay : selectedDraftProject?.name}");
     expect(source).toContain('{hasActiveConversation && activeImTitleDisplay ? <ImChannelTitleIcon slug={activeImTitleDisplay.slug} name={activeImTitleDisplay.channelName} /> : null}');
-    expect(source).toContain("topBarBorder={Boolean(hasActiveConversation || environmentScope)}");
+    expect(source).toContain("topBarBorder={Boolean(hasActiveConversation || environmentScope) && !isPreviewPanelOpen}");
     expect(source).not.toContain("agent-conversation-titlebar");
     expect(source).toContain("app-frame-page-content agent-conversation-scroll flex-1 overflow-y-auto");
     expect(source).toContain("onScroll={handleAgentConversationScroll}");
     expect(source).toContain('className="agent-conversation-composer"');
+  });
+
+  it("keeps preview side-by-side at normal Electron window widths", () => {
+    const source = readFileSync(homePageSourcePath, "utf8");
+    const styles = readFileSync(stylesSourcePath, "utf8");
+
+    expect(source).toContain("const AGENT_PREVIEW_SPLIT_MIN_WIDTH_PX = 720;");
+    expect(source).toContain("minimumContentWidth={isPreviewPanelOpen ? AGENT_PREVIEW_SPLIT_MIN_WIDTH_PX : AGENT_WORKSPACE_MIN_WIDTH_PX}");
+    expect(source).toContain('topBarStyle={isPreviewPanelOpen ? { right: `${previewPanelWidth}px` } : undefined}');
+    expect(styles).toContain("@container agent-workspace (max-width: 719px)");
+    expect(styles).toContain("@container agent-main (max-width: 719px)");
+    expect(styles).not.toContain("@container agent-workspace (max-width: 960px)");
+    expect(styles).toContain(".agent-workspace-layout > .agent-conversation-panel");
+    expect(styles).toContain("flex: 1 1 auto;");
+    expect(styles).toMatch(/\.agent-workspace-layout--preview-open > \.litrev-preview-pane\s*{[^}]*position:\s*relative;[^}]*z-index:\s*110;/s);
+    expect(styles).toMatch(/\.agent-conversation-topbar--preview-open \.agent-conversation-topbar__actions\s*{[^}]*right:\s*calc\(8px - var\(--codex-content-padding-x\)\);/s);
+    expect(styles).toMatch(/\.litrev-preview-toolbar\s*{[^}]*pointer-events:\s*auto;[^}]*-webkit-app-region:\s*no-drag;/s);
+    expect(styles).toMatch(/\.litrev-file-browser__toggle\s*{[^}]*pointer-events:\s*auto;[^}]*-webkit-app-region:\s*no-drag;/s);
+    expect(styles).toMatch(/\.litrev-file-folder__chevron\s*{[^}]*width:\s*12px;[^}]*height:\s*12px;[^}]*flex:\s*0 0 12px;/s);
+    expect(styles).toMatch(/\.app-frame-content-topbar:has\(\.agent-conversation-topbar--preview-open\)\s*{[^}]*-webkit-app-region:\s*no-drag;/s);
+    expect(styles).toMatch(/\.app-frame-content-topbar\s*{[^}]*-webkit-app-region:\s*no-drag;/s);
+    expect(styles).toMatch(/\.agent-conversation-title\s*{[^}]*-webkit-app-region:\s*drag;/s);
+    expect(styles).toMatch(/\.litrev-preview-pane \*\s*{[^}]*-webkit-app-region:\s*no-drag !important;/s);
   });
 
   it("anchors the history DAG popover to the composer width", () => {
@@ -800,7 +873,7 @@ describe("HomePage", () => {
     expect(agentComposerPrimaryAction({ isRunning: true, isGoalActive: true, hasIntent: true })).toBe("send");
     expect(agentComposerPrimaryAction({ isRunning: true, isGoalActive: false, hasIntent: true })).toBe("send");
     expect(agentComposerPrimaryAction({ isRunning: false, isGoalActive: false, hasIntent: false })).toBe("send");
-    expect(source).toContain("const hasComposerIntent = Boolean(input.trim() || pendingAttachments.length > 0);");
+    expect(source).toContain("const hasComposerIntent = Boolean(input.trim() || folderReferences.length || pendingAttachments.length > 0);");
     expect(conversationComposer.match(/<ComposerSubmitButton/g)).toHaveLength(1);
     expect(source).toContain('isSending={composerPrimaryAction === "stop"}');
     expect(source).toContain('onClick={composerPrimaryAction === "stop" ? stopCurrentTurn : () => void sendMessage()}');
@@ -1029,14 +1102,16 @@ describe("HomePage", () => {
     expect(focusInput).toHaveBeenCalledTimes(1);
   });
 
-  it("opens the system media picker directly from the plus button without rendering a floating media menu", () => {
+  it("offers separate file and folder actions from the plus menu", () => {
     const source = readFileSync(homePageSourcePath, "utf8");
 
-    expect(source).toContain("onClick={openMediaFilePicker}");
-    expect(source).not.toContain("function ComposerMediaMenu");
-    expect(source).not.toContain("setMediaMenuOpen");
-    expect(source).not.toContain("aria-haspopup=\"menu\"");
-    expect(source).not.toContain("role=\"menuitem\"");
+    expect(source).toContain('className="agent-composer-attach-menu"');
+    expect(source).toContain('role="menuitem"');
+    expect(source).toContain('t("home.quick.uploadFile")');
+    expect(source).toContain('t("home.quick.uploadFolder")');
+    expect(source).toContain("openMediaFilePicker();");
+    expect(source).toContain("openFolderPicker();");
+    expect(source).toContain('node?.setAttribute("webkitdirectory", "")');
   });
 
   it("renders composer media previews as compact thumbnail and file chips", () => {
@@ -1427,7 +1502,7 @@ describe("HomePage", () => {
   it("anchors composer popovers above the queue and keeps Goal next to the composer", () => {
     const source = readFileSync(homePageSourcePath, "utf8").replace(/\r\n/g, "\n");
     const flowStart = source.indexOf('<div className="agent-composer-flow">');
-    const slashStart = source.indexOf("{slashMenuOpen && (", flowStart);
+    const slashStart = source.indexOf("{slashMenuOpen && !slashPickerOpen && (", flowStart);
     const stackStart = source.indexOf('<div className="agent-composer-stack">', slashStart);
     const queueStart = source.indexOf("<AgentQueuedMessageList", stackStart);
     const goalStart = source.indexOf("<AgentGoalBar", stackStart);

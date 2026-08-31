@@ -386,6 +386,95 @@ describe("WebSocket HTTP route helpers", () => {
     });
   });
 
+  it("lists standalone task files one directory at a time", async () => {
+    const root = tmpRoot();
+    fs.mkdirSync(path.join(root, "src"));
+    fs.mkdirSync(path.join(root, "node_modules"));
+    fs.writeFileSync(path.join(root, "src", "index.ts"), "export {};\n", "utf8");
+    const manager = seedSession(tmpRoot(), "websocket:workspace-files", root);
+    const channel = makeChannel({ sessionManager: manager, workspacePath: root });
+    const headers = withApiToken(channel);
+    const encoded = encodeURIComponent("websocket:workspace-files");
+
+    const rootResponse = await channel.dispatchHttp(localConnection, {
+      path: `/api/sessions/${encoded}/workspace/files`,
+      headers,
+    });
+    expect(rootResponse?.status).toBe(200);
+    expect(responseJson(rootResponse!)).toMatchObject({
+      root: { kind: "task", label: path.basename(root) },
+      path: "",
+      truncated: false,
+      entries: expect.arrayContaining([
+        expect.objectContaining({ name: "src", path: "src", kind: "directory" }),
+        expect.objectContaining({ name: "node_modules", path: "node_modules", kind: "directory" }),
+      ]),
+    });
+
+    const deniedResponse = await channel.dispatchHttp(localConnection, {
+      path: `/api/sessions/${encoded}/workspace/files`,
+    });
+    expect(deniedResponse?.status).toBe(401);
+
+    const methodResponse = await channel.dispatchHttp(localConnection, {
+      path: `/api/sessions/${encoded}/workspace/files`,
+      method: "POST",
+      headers,
+    });
+    expect(methodResponse?.status).toBe(405);
+
+    const nestedResponse = await channel.dispatchHttp(localConnection, {
+      path: `/api/sessions/${encoded}/workspace/files?path=src`,
+      headers,
+    });
+    expect(responseJson(nestedResponse!)).toMatchObject({
+      path: "src",
+      entries: [{ name: "index.ts", path: "src/index.ts", kind: "file", size: 11 }],
+    });
+
+    const traversalResponse = await channel.dispatchHttp(localConnection, {
+      path: `/api/sessions/${encoded}/workspace/files?path=..%2Foutside`,
+      headers,
+    });
+    expect(traversalResponse?.status).toBe(400);
+    expect(responseJson(traversalResponse!)).toMatchObject({ code: "workspace_files_path_invalid" });
+  });
+
+  it("uses the bound project root for workspace files without falling back", async () => {
+    const root = tmpRoot();
+    const workspace = path.join(root, "project-root");
+    fs.mkdirSync(workspace);
+    fs.writeFileSync(path.join(workspace, "project.md"), "project", "utf8");
+    const projectStore = new ProjectStore({ filePath: path.join(root, "projects.json") });
+    const project = projectStore.add(workspace, "existing", "Legal project");
+    const manager = seedSession(path.join(root, "sessions"), "websocket:project-files", workspace);
+    const session = manager.get("websocket:project-files")!;
+    session.metadata.webuiProjectId = project.id;
+    manager.save(session);
+    const channel = makeChannel({ sessionManager: manager, projectStore, workspacePath: root });
+    const headers = withApiToken(channel);
+
+    const response = await channel.dispatchHttp(localConnection, {
+      path: `/api/sessions/${encodeURIComponent("websocket:project-files")}/workspace/files`,
+      headers,
+    });
+
+    expect(response?.status).toBe(200);
+    expect(responseJson(response!)).toMatchObject({
+      root: { kind: "project", label: "Legal project" },
+      entries: [{ name: "project.md", path: "project.md", kind: "file", size: 7 }],
+    });
+
+    session.metadata.webuiProjectId = "00000000-0000-4000-8000-000000000000";
+    manager.save(session);
+    const missingProjectResponse = await channel.dispatchHttp(localConnection, {
+      path: `/api/sessions/${encodeURIComponent("websocket:project-files")}/workspace/files`,
+      headers,
+    });
+    expect(missingProjectResponse?.status).toBe(404);
+    expect(responseJson(missingProjectResponse!)).toMatchObject({ code: "project_not_found" });
+  });
+
   it("serves the selected project environment before a Session exists", async () => {
     const root = tmpRoot();
     const workspace = path.join(root, "workspace");

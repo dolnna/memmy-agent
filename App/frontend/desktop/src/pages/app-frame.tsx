@@ -75,6 +75,9 @@ export interface AppFrameProps {
   reserveTopBar?: boolean;
   topBar?: ReactNode;
   topBarBorder?: boolean;
+  topBarStyle?: CSSProperties;
+  /** Minimum width reserved for the page content while resizing the app sidebar. */
+  minimumContentWidth?: number;
   /** When set, replaces the main app sidebar with settings section navigation. */
   settingsNav?: SettingsSidebarNav;
   children: ReactNode;
@@ -296,10 +299,15 @@ export function AppFrame(props: AppFrameProps) {
     readDeferredGuidanceStep(typeof window === "undefined" ? undefined : window.sessionStorage)
   );
   const [sidebarHidden, setSidebarHidden] = useState(false);
+  const [viewportWidth, setViewportWidth] = useState(() => (
+    typeof window === "undefined" ? 1200 : window.innerWidth
+  ));
   const communityMenuRef = useRef<HTMLDivElement | null>(null);
   const taskScrollRef = useRef<HTMLDivElement | null>(null);
   const [taskScrollFade, setTaskScrollFade] = useState(false);
-  const sidebarResize = useCodexResizableSidebar("memmy.appFrame.sidebarWidth.codex.v2");
+  const sidebarResize = useCodexResizableSidebar("memmy.appFrame.sidebarWidth.codex.v2", {
+    maxWidth: viewportWidth - (props.minimumContentWidth ?? 640)
+  });
   const hasRequestedAgentData = useRef(false);
   const lastNotifiedCompletionAt = useRef<number | null>(null);
   const previousCanonicalSessionKeysRef = useRef<Set<string> | null>(null);
@@ -313,6 +321,12 @@ export function AppFrame(props: AppFrameProps) {
   });
   const accountNameLine = truncateAccountDisplayText(accountSummary.name, SIDEBAR_PROFILE_NAME_MAX_VISUAL_WIDTH);
   const accountMetaLine = truncateAccountDisplayText(accountSummary.meta, SIDEBAR_PROFILE_META_MAX_VISUAL_WIDTH);
+
+  useEffect(() => {
+    const updateViewportWidth = () => setViewportWidth(window.innerWidth);
+    window.addEventListener("resize", updateViewportWidth);
+    return () => window.removeEventListener("resize", updateViewportWidth);
+  }, []);
   const sidebarUpdateAction = resolveSidebarUpdateAction(update, t);
   const visibleTasks = state.agent.tasks;
   const projectTree = useMemo(
@@ -1568,9 +1582,12 @@ export function AppFrame(props: AppFrameProps) {
         onResizeBy={sidebarResize.resizeBy}
       />
 
-      <main className={`relative min-w-0 flex-1 overflow-hidden flex flex-col bg-content-bg${sidebarHidden ? " app-frame-main--sidebar-hidden" : ""}`} aria-label={props.title}>
+      <main className={`app-frame-main relative min-w-0 flex-1 overflow-hidden flex flex-col bg-content-bg${sidebarHidden ? " app-frame-main--sidebar-hidden" : ""}`} aria-label={props.title}>
         {props.reserveTopBar !== false && (
-          <header className={`app-frame-content-topbar${props.topBarBorder ? " app-frame-content-topbar--bordered" : ""}`}>
+          <header
+            className={`app-frame-content-topbar${props.topBarBorder ? " app-frame-content-topbar--bordered" : ""}`}
+            style={props.topBarStyle}
+          >
             {props.topBar}
           </header>
         )}

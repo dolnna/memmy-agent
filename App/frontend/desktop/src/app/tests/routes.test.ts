@@ -98,7 +98,8 @@ describe("desktop route table", () => {
       "/tools",
       "/memory",
       "/memory-sources",
-      "/settings"
+      "/settings",
+      "/legal-diagnosis"
     ]);
   });
 

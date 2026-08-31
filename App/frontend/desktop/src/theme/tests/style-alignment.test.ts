@@ -40,7 +40,7 @@ describe("prototype style alignment", () => {
   });
 
   it("hides scrollbars globally while preserving scroll behavior", () => {
-    const universalRule = globalCss.match(/\*\s*\{[^}]*\}/)?.[0] ?? "";
+    const universalRule = globalCss.match(/^\*\s*\{[^}]*\}/m)?.[0] ?? "";
     const webkitScrollbarRule = globalCss.match(/\*::-webkit-scrollbar\s*\{[^}]*\}/)?.[0] ?? "";
 
     expect(universalRule).toContain("scrollbar-width: none;");
@@ -193,6 +193,8 @@ describe("prototype style alignment", () => {
     expect(sidebarToggleExclusionRule).toContain("left: var(--codex-window-control-inset);");
     expect(sidebarToggleExclusionRule).toContain("width: var(--codex-toolbar-button-size);");
     expect(memoryDrawerDragTrimRule).toContain("right: min(680px, calc(100vw - 24px));");
+    const previewPaneDragTrimRule = globalCss.match(/body:has\(\.litrev-preview-pane\)\s+\.window-drag-region\s*\{[^}]*\}/)?.[0] ?? "";
+    expect(previewPaneDragTrimRule).toContain("right: min(840px, calc(100vw - 280px));");
     expect(resizeHandleRule).toContain("flex: 0 0 8px;");
     expect(resizeHandleRule).toContain("margin-right: -4px;");
     expect(resizeHandleRule).toContain("margin-left: -4px;");
@@ -206,7 +208,7 @@ describe("prototype style alignment", () => {
     const messageContentRule = globalCss.match(/^\.agent-message-content\s*\{[^}]*\}/m)?.[0] ?? "";
     const contentTopbarRule = globalCss.match(/^\.app-frame-content-topbar\s*\{[^}]*\}/m)?.[0] ?? "";
     const contentTopbarBorderedRule = globalCss.match(/\.app-frame-content-topbar--bordered\s*\{[^}]*\}/)?.[0] ?? "";
-    const conversationTitleRule = globalCss.match(/\.agent-conversation-title\s*\{[^}]*\}/)?.[0] ?? "";
+    const conversationTitleRule = globalCss.match(/^\.agent-conversation-title\s*\{[^}]*\}/m)?.[0] ?? "";
     const conversationScrollRule = globalCss.match(/\.agent-conversation-scroll\s*\{[^}]*\}/)?.[0] ?? "";
 
     expect(conversationPanelRules.join("\n")).not.toContain("padding-top:");
@@ -227,7 +229,7 @@ describe("prototype style alignment", () => {
     expect(contentTopbarRule).toContain("align-items: center;");
     expect(contentTopbarRule).toContain("overflow: hidden;");
     expect(contentTopbarRule).toContain("padding: 0 var(--codex-content-padding-x);");
-    expect(contentTopbarRule).toContain("-webkit-app-region: drag;");
+    expect(contentTopbarRule).toContain("-webkit-app-region: no-drag;");
     expect(contentTopbarRule).not.toContain("border-bottom:");
     expect(contentTopbarBorderedRule).toContain("background: transparent");
     expect(contentTopbarBorderedRule).toContain("border-bottom: none");
