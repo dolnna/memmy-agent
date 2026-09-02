@@ -16,7 +16,8 @@ const ROUTE_PAGE_TITLES: Record<AppRoutePath, string> = {
   "/tools": "Tools",
   "/memory": "Memory",
   "/memory-sources": "Memory Sources",
-  "/settings": "Settings"
+  "/settings": "Settings",
+  "/legal-diagnosis": "Employment Risk Diagnosis"
 };
 
 const MEMORY_SUB_PAGE_TITLES: Record<MemorySubPageId, string> = {

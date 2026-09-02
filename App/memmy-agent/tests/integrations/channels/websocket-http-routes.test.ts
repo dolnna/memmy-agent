@@ -475,6 +475,112 @@ describe("WebSocket HTTP route helpers", () => {
     expect(responseJson(missingProjectResponse!)).toMatchObject({ code: "project_not_found" });
   });
 
+  it("lists and previews the default workspace before a standalone Session exists", async () => {
+    const workspace = tmpRoot("memmy-default-workspace-");
+    fs.mkdirSync(path.join(workspace, "notes"));
+    fs.writeFileSync(path.join(workspace, "AGENTS.md"), "workspace instructions\n", "utf8");
+    fs.writeFileSync(path.join(workspace, "notes", "draft.md"), "draft\n", "utf8");
+    const channel = makeChannel({ workspacePath: workspace });
+    const headers = withApiToken(channel);
+
+    const rootResponse = await channel.dispatchHttp(localConnection, {
+      path: "/api/workspace/files",
+      headers,
+    });
+    expect(rootResponse?.status).toBe(200);
+    expect(responseJson(rootResponse!)).toMatchObject({
+      root: { kind: "task", label: path.basename(workspace) },
+      path: "",
+      entries: expect.arrayContaining([
+        expect.objectContaining({ name: "notes", kind: "directory" }),
+        expect.objectContaining({ name: "AGENTS.md", kind: "file" }),
+      ]),
+    });
+
+    const nestedResponse = await channel.dispatchHttp(localConnection, {
+      path: "/api/workspace/files?path=notes",
+      headers,
+    });
+    expect(responseJson(nestedResponse!)).toMatchObject({
+      path: "notes",
+      entries: [expect.objectContaining({ name: "draft.md", path: "notes/draft.md" })],
+    });
+
+    const artifactResponse = await channel.dispatchHttp(localConnection, {
+      path: "/api/webui/artifacts/resolve",
+      method: "POST",
+      headers,
+      body: JSON.stringify({ path: "AGENTS.md", workspace: true }),
+    });
+    expect(artifactResponse?.status).toBe(200);
+    expect(responseJson(artifactResponse!)).toMatchObject({ name: "AGENTS.md", kind: "file" });
+
+    expect((await channel.dispatchHttp(localConnection, { path: "/api/workspace/files" }))?.status).toBe(401);
+    expect((await channel.dispatchHttp(localConnection, {
+      path: "/api/workspace/files",
+      method: "POST",
+      headers,
+    }))?.status).toBe(405);
+    expect((await channel.dispatchHttp(localConnection, {
+      path: "/api/workspace/files?path=..",
+      headers,
+    }))?.status).toBe(400);
+  });
+
+  it("lists a saved project root before a Session exists", async () => {
+    const root = tmpRoot();
+    const workspace = path.join(root, "memmy-agent");
+    fs.mkdirSync(path.join(workspace, "App"), { recursive: true });
+    fs.writeFileSync(path.join(workspace, "README.md"), "Memmy\n", "utf8");
+    fs.writeFileSync(path.join(workspace, "App", "index.ts"), "export {};\n", "utf8");
+    const projectStore = new ProjectStore({ filePath: path.join(root, "projects.json") });
+    const project = projectStore.add(workspace, "existing", "memmy-agent");
+    const channel = makeChannel({ projectStore, workspacePath: workspace });
+    const headers = withApiToken(channel);
+    const route = `/api/projects/${encodeURIComponent(project.id)}/workspace/files`;
+
+    const response = await channel.dispatchHttp(localConnection, { path: route, headers });
+    expect(response?.status).toBe(200);
+    expect(responseJson(response!)).toMatchObject({
+      root: { kind: "project", label: "memmy-agent" },
+      path: "",
+      entries: expect.arrayContaining([
+        expect.objectContaining({ name: "App", kind: "directory" }),
+        expect.objectContaining({ name: "README.md", kind: "file" }),
+      ]),
+    });
+
+    const nested = await channel.dispatchHttp(localConnection, { path: `${route}?path=App`, headers });
+    expect(responseJson(nested!)).toMatchObject({
+      path: "App",
+      entries: [{ name: "index.ts", path: "App/index.ts", kind: "file" }],
+    });
+
+    const artifact = await channel.dispatchHttp(localConnection, {
+      path: "/api/webui/artifacts/resolve",
+      method: "POST",
+      headers,
+      body: JSON.stringify({ path: "README.md", projectId: project.id }),
+    });
+    expect(artifact?.status).toBe(200);
+    expect(responseJson(artifact!)).toMatchObject({ name: "README.md", kind: "file" });
+    const outsideArtifact = await channel.dispatchHttp(localConnection, {
+      path: "/api/webui/artifacts/resolve",
+      method: "POST",
+      headers,
+      body: JSON.stringify({ path: path.resolve(os.tmpdir(), "outside.txt"), projectId: project.id }),
+    });
+    expect(outsideArtifact?.status).toBe(404);
+
+    expect((await channel.dispatchHttp(localConnection, { path: route }))?.status).toBe(401);
+    expect((await channel.dispatchHttp(localConnection, { path: route, method: "POST", headers }))?.status).toBe(405);
+    expect((await channel.dispatchHttp(localConnection, { path: `${route}?path=..`, headers }))?.status).toBe(400);
+    expect((await channel.dispatchHttp(localConnection, {
+      path: "/api/projects/missing/workspace/files",
+      headers,
+    }))?.status).toBe(404);
+  });
+
   it("serves the selected project environment before a Session exists", async () => {
     const root = tmpRoot();
     const workspace = path.join(root, "workspace");

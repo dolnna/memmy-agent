@@ -5,6 +5,7 @@ import {
   AccountLoginResultViewSchema,
   AccountSessionViewSchema,
   ApiErrorBodySchema,
+  AsrTranscriptionInputSchema,
   AsrTranscriptionResponseSchema,
   AuthorizeIntegrationResponseSchema,
   AvatarOptionSchema,
@@ -87,8 +88,36 @@ describe("local app contracts", () => {
       modelId: "account-asr",
       provider: "memmy_account",
       source: "account",
-      transcribedAt: "2026-06-15T10:00:00.000Z"
+      transcribedAt: "2026-06-15T10:00:00.000Z",
+      segments: [{
+        id: "segment-1",
+        speakerId: 0,
+        startMs: 10,
+        endMs: 20,
+        text: "hello",
+        words: [{ text: "hello", startMs: 10, endMs: 20 }]
+      }]
     }).modelId).toBe("account-asr");
+  });
+
+  it("validates speaker-diarized ASR input bounds", () => {
+    expect(AsrTranscriptionInputSchema.parse({
+      audioBase64: "UklGRg==",
+      mimeType: "audio/wav",
+      fileName: "interview.wav",
+      diarizationEnabled: true,
+      speakerCount: 2
+    }).speakerCount).toBe(2);
+    expect(AsrTranscriptionInputSchema.safeParse({
+      audioBase64: "UklGRg==",
+      mimeType: "audio/wav",
+      speakerCount: 1
+    }).success).toBe(false);
+    expect(AsrTranscriptionInputSchema.safeParse({
+      audioBase64: "UklGRg==",
+      mimeType: "audio/wav",
+      speakerCount: 101
+    }).success).toBe(false);
   });
 
   it("parses BYOK token usage event and summary contracts", () => {

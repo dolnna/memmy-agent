@@ -1037,9 +1037,32 @@ export type ModelConfigView = z.infer<typeof ModelConfigViewSchema>;
 export const AsrTranscriptionInputSchema = z.object({
     audioBase64: z.string().min(1),
     mimeType: z.string().min(1),
-    durationMs: z.number().int().nonnegative().optional()
+    durationMs: z.number().int().nonnegative().optional(),
+    fileName: z.string().trim().min(1).optional(),
+    diarizationEnabled: z.boolean().optional(),
+    speakerCount: z.number().int().min(2).max(100).optional()
 });
 export type AsrTranscriptionInput = z.infer<typeof AsrTranscriptionInputSchema>;
+
+/** Schema for a word aligned to an ASR transcript timeline. */
+export const AsrTranscriptWordSchema = z.object({
+    text: z.string(),
+    startMs: z.number().int().nonnegative(),
+    endMs: z.number().int().nonnegative(),
+    punctuation: z.string().optional()
+});
+export type AsrTranscriptWord = z.infer<typeof AsrTranscriptWordSchema>;
+
+/** Schema for a speaker-attributed ASR transcript segment. */
+export const AsrTranscriptSegmentSchema = z.object({
+    id: z.string().min(1),
+    speakerId: z.number().int().nonnegative().nullable(),
+    startMs: z.number().int().nonnegative(),
+    endMs: z.number().int().nonnegative(),
+    text: z.string(),
+    words: z.array(AsrTranscriptWordSchema)
+});
+export type AsrTranscriptSegment = z.infer<typeof AsrTranscriptSegmentSchema>;
 
 /** Schema for asr transcription response. */
 export const AsrTranscriptionResponseSchema = z.object({
@@ -1047,9 +1070,71 @@ export const AsrTranscriptionResponseSchema = z.object({
     modelId: z.string().trim().min(1),
     provider: CatalogProviderIdSchema,
     source: z.enum(["account", "byok"]),
-    transcribedAt: z.string().datetime()
+    transcribedAt: z.string().datetime(),
+    segments: z.array(AsrTranscriptSegmentSchema).optional()
 });
 export type AsrTranscriptionResponse = z.infer<typeof AsrTranscriptionResponseSchema>;
+
+export const QWEN_ASR_REALTIME_MODEL_ID = "qwen-audio-3.0-asr-flash-streaming" as const;
+export const ASR_REALTIME_SAMPLE_RATE = 16_000 as const;
+
+/** Initial renderer-to-local-backend request for a real-time ASR session. */
+export const AsrRealtimeStartInputSchema = z.object({
+    type: z.literal("start"),
+    sampleRate: z.literal(ASR_REALTIME_SAMPLE_RATE).default(ASR_REALTIME_SAMPLE_RATE),
+    languageHints: z.array(z.string().trim().min(1)).max(4).optional()
+});
+export type AsrRealtimeStartInput = z.infer<typeof AsrRealtimeStartInputSchema>;
+
+/** Renderer command that asks the upstream recognizer to flush and finish. */
+export const AsrRealtimeFinishInputSchema = z.object({
+    type: z.literal("finish")
+});
+export type AsrRealtimeFinishInput = z.infer<typeof AsrRealtimeFinishInputSchema>;
+
+export const AsrRealtimeClientMessageSchema = z.discriminatedUnion("type", [
+    AsrRealtimeStartInputSchema,
+    AsrRealtimeFinishInputSchema
+]);
+export type AsrRealtimeClientMessage = z.infer<typeof AsrRealtimeClientMessageSchema>;
+
+/** Local backend event emitted after DashScope accepts the real-time task. */
+export const AsrRealtimeReadyEventSchema = z.object({
+    type: z.literal("ready"),
+    taskId: z.string().min(1),
+    modelId: z.literal(QWEN_ASR_REALTIME_MODEL_ID)
+});
+
+/** One provisional or final sentence emitted during real-time recognition. */
+export const AsrRealtimeTranscriptEventSchema = z.object({
+    type: z.literal("transcript"),
+    sentenceId: z.number().int().nonnegative(),
+    startMs: z.number().int().nonnegative(),
+    endMs: z.number().int().nonnegative().nullable(),
+    text: z.string(),
+    final: z.boolean(),
+    words: z.array(AsrTranscriptWordSchema)
+});
+export type AsrRealtimeTranscriptEvent = z.infer<typeof AsrRealtimeTranscriptEventSchema>;
+
+export const AsrRealtimeFinishedEventSchema = z.object({
+    type: z.literal("finished"),
+    taskId: z.string().min(1)
+});
+
+export const AsrRealtimeErrorEventSchema = z.object({
+    type: z.literal("error"),
+    code: z.string().optional(),
+    message: z.string().min(1)
+});
+
+export const AsrRealtimeServerEventSchema = z.discriminatedUnion("type", [
+    AsrRealtimeReadyEventSchema,
+    AsrRealtimeTranscriptEventSchema,
+    AsrRealtimeFinishedEventSchema,
+    AsrRealtimeErrorEventSchema
+]);
+export type AsrRealtimeServerEvent = z.infer<typeof AsrRealtimeServerEventSchema>;
 
 export const AccountChannelSchema = z.enum(["email", "phone"]);
 export type AccountChannel = z.infer<typeof AccountChannelSchema>;

@@ -259,6 +259,12 @@ export function shouldCreateNewAgentDraft(agent: NewAgentDraftState): boolean {
     && !(agent.composerPendingAttachmentsByScope[draftScopeKey]?.length);
 }
 
+export function resolveDefaultNewAgentTarget(projects: MemmyAgentProject[]): WebuiSessionTarget {
+  return projects.length === 1
+    ? { kind: "project", projectId: projects[0]!.id }
+    : { kind: "standalone" };
+}
+
 /** Sidebar workspace highlight: only when a blank new-task draft targets a project. */
 export function resolveSelectedSidebarProjectId(
   agent: Pick<AppState["agent"], "currentSessionKey" | "newChatRequestId" | "draftTargetsByScope">,
@@ -550,14 +556,17 @@ export function AppFrame(props: AppFrameProps) {
       dispatch(agentActions.blankDraftReopened());
     }
     if (target || !(draftScopeKey in state.agent.draftTargetsByScope)) {
-      dispatch(agentActions.draftTargetUpdated(draftScopeKey, target ?? { kind: "standalone" }));
+      dispatch(agentActions.draftTargetUpdated(
+        draftScopeKey,
+        target ?? resolveDefaultNewAgentTarget(state.agent.projects)
+      ));
     }
     dispatch(appActions.navigate("/main"));
   }
 
   function openSidebarRoute(path: AppRoutePath) {
     if (path === "/main") {
-      openNewAgent({ kind: "standalone" });
+      openNewAgent();
     } else {
       dispatch(appActions.navigate(path));
     }

@@ -1,6 +1,7 @@
 import type {
   AsrModelId,
   AsrProvider,
+  AsrTranscriptSegment,
   AuthorizeIntegrationResponse,
   AccountInvitationView,
   HealthStatus,
@@ -190,6 +191,9 @@ export interface CloudAsrTranscriptionInput {
   audioBase64: string;
   mimeType: string;
   durationMs?: number;
+  fileName?: string;
+  diarizationEnabled?: boolean;
+  speakerCount?: number;
 }
 
 /** Contract for cloud asr transcription result. */
@@ -197,6 +201,7 @@ export interface CloudAsrTranscriptionResult {
   text: string;
   modelId: AsrModelId;
   provider: AsrProvider;
+  segments?: AsrTranscriptSegment[];
 }
 
 export interface CloudClient {

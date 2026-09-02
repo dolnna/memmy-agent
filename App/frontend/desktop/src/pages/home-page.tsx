@@ -1,6 +1,6 @@
 /** Home page module. */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type CSSProperties, type DragEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type SetStateAction, type UIEvent } from "react";
-import type { AgentGatewayStartupIssue } from "@memmy/local-api-contracts";
+import type { AgentGatewayStartupIssue, AsrRealtimeTranscriptEvent } from "@memmy/local-api-contracts";
 import { hydrateAgentThreadInBackground, refreshAgentTaskList, useAgentRuntimeBridge, type AgentTaskStateCoordinator } from "../app/agent-runtime-bridge.js";
 import { useApiClients } from "../app/providers.js";
 import { FOCUSED_AGENT_CHAT_STORAGE_KEY, clearFocusedAgentTarget, isAccountTokenQuotaExhausted, normalizeAgentChatId, readLaunchAgentChatId, removeLaunchAgentChatIdFromUrl } from "../app/routes.js";
@@ -12,6 +12,7 @@ import {
   type MemmyAgentProject,
   type MemmyAgentSessionSummary,
   type MemmyAgentSlashCommand,
+  type WorkspaceFileScope,
   type WorkspaceFilesListing,
   type AgentTurnSource,
   type MemmyAgentUiLanguage,
@@ -74,8 +75,9 @@ import { AgentGoalBar, type AgentGoalControlRequest } from "./agent-goal-bar.js"
 import { AgentQueuedMessageList } from "./agent-queued-message-list.js";
 import { AgentThreadMessages, ChatImageLightbox } from "./agent-thread-messages.js";
 import { AgentWorkspaceContext } from "./agent-workspace-context.js";
-import { AppFrame } from "./app-frame.js";
+import { AppFrame, resolveDefaultNewAgentTarget } from "./app-frame.js";
 import {
+  blobToAudioBase64,
   MicrophonePermissionError,
   mergeVoiceTranscript,
   microphonePermissionDeniedMessageKey,
@@ -94,15 +96,28 @@ import {
 } from "./first-encounter-task-launch.js";
 import { HistoryDagPanel, type HistoryDagPanelState } from "./history-dag-panel.js";
 import { LlmProviderLogo } from "./llm-provider-logo.js";
+import { ComposerHighlightedTextarea } from "./composer-highlighted-textarea.js";
 import { Mic, Pause, Plus, Send } from "./memory/memory-prototype-icons.js";
 import { resolveWorkspaceEnvironmentScope, useWorkspaceEnvironment } from "./use-workspace-environment.js";
-import { ArrowDown, Check, ChevronDown, Folder, PanelRight, Plus as LucidePlus, RotateCw, Scale, SlidersHorizontal, SquareSlash, Target, X } from "lucide-react";
+import { ArrowDown, ArrowRight, AudioLines, Check, ChevronDown, Folder, PanelRight, Plus as LucidePlus, RotateCw, Scale, SlidersHorizontal, SquareSlash, Target, Workflow, X } from "lucide-react";
 import {
   LEGAL_DIAGNOSIS_COMMAND,
   isLegalDiagnosisCommand,
+  isLegalDiagnosisNaturalIntent,
   stripLegalDiagnosisCommand,
-  writeLegalDiagnosisPrompt
+  writeLegalDiagnosisProjectContext,
+  writeLegalDiagnosisPrompt,
+  writeLegalDiagnosisSourceInput
 } from "./labor-diagnostic-model.js";
+import {
+  LegalRecordingCollectionPreview,
+  normalizeLegalStructuredTranscriptSegments,
+  recordingTranscriptSourceFile,
+  type LegalRecordingAudioAsset,
+  type LegalRecordingPreviewState,
+  type LegalRecordingSurface,
+  type LegalRecordingViewItem
+} from "./labor-recording-preview-pane.js";
 
 export { agentChatScopeKey, updateComposerDraftForScope };
 export { hydrateAgentThreadInBackground };
@@ -110,6 +125,7 @@ export { isComposingKeyboardEvent } from "../utils/keyboard.js";
 export type { PendingAttachment, PendingAttachmentBase, PendingFileAttachment, PendingImage };
 
 const NEW_TASK_MODEL_SCOPE_KEY = "draft-new-task";
+const TASK_RECORDING_TAB_ID = "views/访谈录音";
 
 const COMPOSER_MEDIA_STRIP_STYLE = { maxHeight: "min(7.5rem, 28vh)" } satisfies CSSProperties;
 const AGENT_WS_SAFE_FRAME_BYTES = 1024 * 1024;
@@ -461,6 +477,16 @@ export function isAgentConversationAtBottom(element: Pick<HTMLElement, "scrollTo
 
 export function hasActiveAgentConversation(currentChatId: string | null, messageCount: number): boolean {
   return Boolean(currentChatId) && messageCount > 0;
+}
+
+export function resolveDraftProjectForNewTask(
+  currentChatId: string | null,
+  currentSessionKey: string | null,
+  target: WebuiSessionTarget,
+  projects: MemmyAgentProject[]
+): MemmyAgentProject | null {
+  if (currentChatId || currentSessionKey || target.kind !== "project") return null;
+  return projects.find((project) => project.id === target.projectId) ?? null;
 }
 
 export function shouldAcceptAgentStatusResult(input: {
@@ -978,6 +1004,27 @@ export function HomePage() {
   const [environmentPanelOpen, setEnvironmentPanelOpen] = useState(false);
   const [previewPanelOpen, setPreviewPanelOpen] = useState(false);
   const [previewPanelWidth, setPreviewPanelWidth] = useState(520);
+  const [previewOpenRequest, setPreviewOpenRequest] = useState<{
+    path: string;
+    requestId: number;
+    fileTreeOpen?: boolean;
+  } | null>(null);
+  const [taskRecordingId, setTaskRecordingId] = useState(() => `recording-${crypto.randomUUID()}`);
+  const taskRecordingIdRef = useRef(taskRecordingId);
+  const [taskRecordingTitle, setTaskRecordingTitle] = useState(() => t("legalDiagnosis.recording.preview.recordingTitle"));
+  const [taskRecordingCreatedAt, setTaskRecordingCreatedAt] = useState(() => new Date().toISOString());
+  const [taskRecordingHistory, setTaskRecordingHistory] = useState<LegalRecordingViewItem[]>([]);
+  const [selectedTaskRecordingId, setSelectedTaskRecordingId] = useState(taskRecordingId);
+  const [taskRecordingSurface, setTaskRecordingSurface] = useState<LegalRecordingSurface>("list");
+  const [taskRecordingAudio, setTaskRecordingAudio] = useState<LegalRecordingAudioAsset | undefined>();
+  const [taskRecordingSeconds, setTaskRecordingSeconds] = useState(0);
+  const [taskRecordingPreview, setTaskRecordingPreview] = useState<LegalRecordingPreviewState>({
+    mode: "idle",
+    elapsedSeconds: 0,
+    transcript: "",
+    transcriptSource: null
+  });
+  taskRecordingIdRef.current = taskRecordingId;
   const [isCreatingChat, setIsCreatingChat] = useState(false);
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
   const [projectPickerOperationId, setProjectPickerOperationId] = useState<string | null>(null);
@@ -1045,6 +1092,51 @@ export function HomePage() {
     };
   }, [slashPickerOpen]);
   const asrRecorder = useAsrRecorder(clients?.asr, { emptyAudioMessage: t("home.asrEmptyAudio") });
+  const taskRecordingRecorder = useAsrRecorder(clients?.asr, {
+    emptyAudioMessage: t("home.asrEmptyAudio"),
+    onAudioCaptured: (audio) => {
+      setTaskRecordingAudio({
+        id: taskRecordingIdRef.current,
+        ...audio,
+        name: taskRecordingNameForMimeType(audio.mimeType)
+      });
+    },
+    transcribeOptions: {
+      diarizationEnabled: true
+    },
+    realtime: {
+      enabled: true,
+      languageHints: ["zh", "en"],
+      onTranscript: (event) => setTaskRecordingPreview((current) => appendTaskRealtimeTranscript(current, event)),
+      onError: (error) => setTaskRecordingPreview((current) => ({
+        ...current,
+        realtimeError: error.message
+      }))
+    }
+  });
+  useEffect(() => {
+    if (taskRecordingRecorder.status !== "recording") return;
+    const timer = window.setInterval(() => setTaskRecordingSeconds((seconds) => seconds + 1), 1000);
+    return () => window.clearInterval(timer);
+  }, [taskRecordingRecorder.status]);
+  useEffect(() => {
+    const status = taskRecordingRecorder.status;
+    const mode = status === "recording"
+      ? "recording"
+      : status === "paused"
+        ? "paused"
+        : status === "transcribing"
+          ? "transcribing"
+          : status === "checkingPermission" || status === "requestingPermission" || status === "starting"
+            ? "starting"
+            : null;
+    if (!mode) return;
+    setTaskRecordingPreview((current) => ({
+      ...current,
+      mode,
+      elapsedSeconds: taskRecordingSeconds
+    }));
+  }, [taskRecordingRecorder.status, taskRecordingSeconds]);
   const chatScopeKey = agentChatScopeKey(state.agent.currentChatId, state.agent.newChatRequestId);
   const modelSelectionScopeKey = state.agent.currentChatId ?? NEW_TASK_MODEL_SCOPE_KEY;
   const modelWorkspaceMode = state.bootstrap?.app.userMode === "byok" ? "byok" : "account";
@@ -1069,10 +1161,15 @@ export function HomePage() {
   const composerInput = composerCommandDraft.text;
   const pendingAttachments = pendingAttachmentsByScope[chatScopeKey] ?? [];
   const folderReferences = folderReferencesByScope[chatScopeKey] ?? [];
-  const draftTarget = state.agent.draftTargetsByScope[chatScopeKey] ?? { kind: "standalone" as const };
-  const selectedDraftProject = draftTarget.kind === "project"
-    ? state.agent.projects.find((project) => project.id === draftTarget.projectId) ?? null
-    : null;
+  const storedDraftTarget = state.agent.draftTargetsByScope[chatScopeKey];
+  const draftTarget = storedDraftTarget
+    ?? resolveDefaultNewAgentTarget(state.agent.projects);
+  const selectedDraftProject = resolveDraftProjectForNewTask(
+    state.agent.currentChatId,
+    state.agent.currentSessionKey,
+    draftTarget,
+    state.agent.projects
+  );
   const activeTask = state.agent.currentSessionKey
     ? state.agent.tasks.find((task) => task.sessionKey === state.agent.currentSessionKey) ?? null
     : state.agent.currentChatId
@@ -1087,21 +1184,47 @@ export function HomePage() {
     ? state.agent.projects.find((project) => project.id === activeProjectId) ?? null
     : null;
   const previewRootLabel = activeProject?.name
+    ?? selectedDraftProject?.name
     ?? activeTask?.title
-    ?? t("workspacePreview.taskFolder");
+    ?? t("workspacePreview.workspaceFolder");
+  const previewDirectoryEmptyLabel = t(activeProject || selectedDraftProject
+    ? "workspacePreview.projectDirectoryEmpty"
+    : previewSessionKey
+      ? "workspacePreview.taskDirectoryEmpty"
+      : "workspacePreview.workspaceDirectoryEmpty");
+  const previewDirectoryEmptyDetail = previewRootLabel;
   const environmentScope = resolveWorkspaceEnvironmentScope(
     state.agent.currentSessionKey,
     selectedDraftProject?.id ?? null,
   );
-  const loadPreviewDirectory = useCallback((sessionKey: string, relativePath: string): Promise<WorkspaceFilesListing> => {
+  useEffect(() => {
+    if (
+      state.agent.currentChatId
+      || storedDraftTarget !== undefined
+      || state.agent.projectRegistryState !== "ready"
+      || state.agent.projects.length !== 1
+    ) return;
+    dispatch(agentActions.draftTargetUpdated(chatScopeKey, {
+      kind: "project",
+      projectId: state.agent.projects[0]!.id
+    }));
+  }, [chatScopeKey, dispatch, state.agent.currentChatId, state.agent.projectRegistryState, state.agent.projects, storedDraftTarget]);
+  const previewFileScope = useMemo<WorkspaceFileScope>(() => (
+    previewSessionKey
+      ? { kind: "session", key: previewSessionKey }
+      : selectedDraftProject
+        ? { kind: "project", key: selectedDraftProject.id }
+        : { kind: "workspace" }
+  ), [previewSessionKey, selectedDraftProject?.id]);
+  const loadPreviewDirectory = useCallback((_sessionKey: string, relativePath: string): Promise<WorkspaceFilesListing> => {
     const client = clients?.memmyAgent;
     if (!client) return Promise.reject(new Error("agent_client_unavailable"));
-    return client.listWorkspaceFiles(sessionKey, relativePath);
-  }, [clients?.memmyAgent]);
+    return client.listWorkspaceFiles(previewFileScope, relativePath);
+  }, [clients?.memmyAgent, previewFileScope]);
   const loadWorkspaceFilePreview = useCallback(async (relativePath: string): Promise<WorkspacePreviewContent | null> => {
     const client = clients?.memmyAgent;
-    if (!client || !previewSessionKey) return null;
-    const artifact = await client.resolveArtifact(relativePath, previewSessionKey);
+    if (!client) return null;
+    const artifact = await client.resolveArtifact(relativePath, previewFileScope);
     const extension = artifact.name.includes(".") ? artifact.name.split(".").pop()?.toUpperCase() ?? "" : "";
     if (artifact.media_url && WORKSPACE_TEXT_PREVIEW_PATTERN.test(artifact.name)) {
       const response = await fetch(artifact.media_url);
@@ -1117,7 +1240,7 @@ export function HomePage() {
         body: `${t("workspacePreview.binaryUnavailable")}\n\n${artifact.path}`
       }]
     };
-  }, [clients?.memmyAgent, previewSessionKey, t]);
+  }, [clients?.memmyAgent, previewFileScope, t]);
   const currentSessionProjectBlocked = state.agent.projectRegistryState === "corrupt"
     && Boolean(
       state.agent.currentSessionKey
@@ -1151,7 +1274,11 @@ export function HomePage() {
     && !currentQueuedMessages.some((item) => item.status === "steering")
   );
   const hasActiveConversation = hasActiveAgentConversation(state.agent.currentChatId, state.agent.messages.length);
-  const canPreviewWorkspace = hasActiveConversation && Boolean(previewSessionKey);
+  const workspacePreviewSessionKey = previewSessionKey
+    ?? (!hasActiveConversation
+      ? `draft:${state.agent.newChatRequestId}:${selectedDraftProject?.id ?? "standalone"}`
+      : null);
+  const canPreviewWorkspace = Boolean(workspacePreviewSessionKey);
   const isPreviewPanelOpen = previewPanelOpen && canPreviewWorkspace;
   const activeConversationTitle = state.agent.currentSessionKey
     ? state.agent.tasks.find((task) => task.sessionKey === state.agent.currentSessionKey)?.title.trim() || t("home.title")
@@ -1765,7 +1892,7 @@ export function HomePage() {
   const hasComposerPayload = Boolean(input.trim() || folderReferences.length || pendingAttachments.some((item) => item.status === "ready"));
   const hasComposerIntent = Boolean(input.trim() || folderReferences.length || pendingAttachments.length > 0);
   const stopInFlight = state.agent.currentChatId ? Boolean(state.agent.stopInFlightByChatId[state.agent.currentChatId]) : false;
-  const isLocalWorkflowCommand = /(?:^|\s)\/legal-diagnosis(?=\s|$)/i.test(input);
+  const isLocalWorkflowCommand = isLegalDiagnosisCommand(input) || isLegalDiagnosisNaturalIntent(input);
   const composerSendDisabled = isLocalWorkflowCommand
     ? false
     : stopInFlight
@@ -2157,16 +2284,43 @@ export function HomePage() {
   }
 
   function launchLegalDiagnosis(rawText = composerInput) {
+    const sourceInput = rawText.trim();
+    const prompt = stripLegalDiagnosisCommand(sourceInput) || t("home.capability.legalDiagnosisPrompt");
+    const normalizedSourceInput = sourceInput || `${LEGAL_DIAGNOSIS_COMMAND}  ${prompt}`;
     rememberSlashCommand(LEGAL_DIAGNOSIS_COMMAND);
-    writeLegalDiagnosisPrompt(stripLegalDiagnosisCommand(rawText));
+    writeLegalDiagnosisPrompt(prompt);
+    writeLegalDiagnosisSourceInput(normalizedSourceInput);
+    writeLegalDiagnosisProjectContext(activeProjectId ?? selectedDraftProject?.id ?? null);
     setCurrentComposerDraft("");
     setSlashMenuDismissed(true);
     setSlashPickerOpen(false);
     dispatch(appActions.navigate("/legal-diagnosis"));
   }
 
+  function prepareLegalDiagnosis() {
+    const prompt = `${LEGAL_DIAGNOSIS_COMMAND}  ${t("home.capability.legalDiagnosisPrompt")}`;
+    setCurrentComposerDraft(prompt);
+    setSlashMenuDismissed(true);
+    setSlashPickerOpen(false);
+    window.requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      inputRef.current?.setSelectionRange(prompt.length, prompt.length);
+    });
+  }
+
+  function prepareLegalSystemDesign() {
+    const prompt = t("home.capability.legalSystemDesignPrompt");
+    setCurrentComposerDraft(prompt);
+    setSlashMenuDismissed(true);
+    setSlashPickerOpen(false);
+    window.requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      inputRef.current?.setSelectionRange(prompt.length, prompt.length);
+    });
+  }
+
   function runExactLocalSlashCommand(command: string): boolean {
-    if (isLegalDiagnosisCommand(command)) {
+    if (isLegalDiagnosisCommand(command) || isLegalDiagnosisNaturalIntent(command)) {
       launchLegalDiagnosis(command);
       return true;
     }
@@ -2601,13 +2755,6 @@ export function HomePage() {
       return;
     }
 
-    if (command.command === LEGAL_DIAGNOSIS_COMMAND) {
-      launchLegalDiagnosis(composerInput.includes(LEGAL_DIAGNOSIS_COMMAND)
-        ? composerInput
-        : `${LEGAL_DIAGNOSIS_COMMAND}  ${composerInput}`.trim());
-      return;
-    }
-
     if (command.command === COMPOSER_GOAL_COMMAND) {
       rememberSlashCommand(command.command);
       setSelectedComposerCommandForScope(chatScopeKey, COMPOSER_GOAL_COMMAND);
@@ -2717,6 +2864,212 @@ export function HomePage() {
       return;
     }
     startVoiceInput();
+  }
+
+  function openTaskRecordingLibrary() {
+    setTaskRecordingSurface("list");
+    setPreviewPanelOpen(true);
+    setPreviewOpenRequest((current) => ({
+      path: TASK_RECORDING_TAB_ID,
+      requestId: (current?.requestId ?? 0) + 1,
+      fileTreeOpen: false
+    }));
+  }
+
+  function toggleWorkspacePreview() {
+    if (isPreviewPanelOpen) {
+      setPreviewPanelOpen(false);
+      return;
+    }
+    setPreviewOpenRequest(null);
+    setPreviewPanelOpen(true);
+  }
+
+  function archiveCurrentTaskRecording() {
+    const state: LegalRecordingPreviewState = {
+      ...taskRecordingPreview,
+      ...(taskRecordingAudio ? { recording: taskRecordingAudio } : {})
+    };
+    if (!taskRecordingHasContent(state)) return;
+    const item: LegalRecordingViewItem = {
+      id: taskRecordingId,
+      label: taskRecordingTitle,
+      createdAt: taskRecordingCreatedAt,
+      state
+    };
+    setTaskRecordingHistory((current) => [
+      ...current.filter((candidate) => candidate.id !== item.id),
+      item
+    ]);
+  }
+
+  function beginTaskRecordingItem(label: string, createdAt = new Date().toISOString()): string {
+    archiveCurrentTaskRecording();
+    const id = `recording-${crypto.randomUUID()}`;
+    taskRecordingIdRef.current = id;
+    setTaskRecordingId(id);
+    setSelectedTaskRecordingId(id);
+    setTaskRecordingTitle(label);
+    setTaskRecordingCreatedAt(createdAt);
+    return id;
+  }
+
+  async function startTaskRecording() {
+    beginTaskRecordingItem(t("legalDiagnosis.recording.preview.recordingTitle"));
+    setTaskRecordingSurface("session");
+    setTaskRecordingSeconds(0);
+    setTaskRecordingAudio(undefined);
+    setTaskRecordingPreview({
+      mode: "starting",
+      elapsedSeconds: 0,
+      transcript: "",
+      transcriptSource: null
+    });
+    try {
+      await taskRecordingRecorder.start();
+    } catch (error) {
+      setTaskRecordingPreview({
+        mode: "idle",
+        elapsedSeconds: 0,
+        transcript: "",
+        transcriptSource: null,
+        realtimeError: readableError(error)
+      });
+    }
+  }
+
+  async function finishTaskRecording() {
+    setTaskRecordingPreview((current) => ({
+      ...current,
+      mode: "transcribing",
+      elapsedSeconds: taskRecordingSeconds
+    }));
+    try {
+      const result = await taskRecordingRecorder.finishAndTranscribe();
+      completeTaskRecording(result.text, result.segments);
+    } catch (error) {
+      setTaskRecordingPreview((current) => ({
+        ...current,
+        mode: "completed",
+        elapsedSeconds: taskRecordingSeconds,
+        transcript: "",
+        transcriptSource: null,
+        realtimeError: readableError(error)
+      }));
+    }
+  }
+
+  async function uploadTaskRecording(file: File) {
+    const recordedAt = file.lastModified > 0 ? new Date(file.lastModified).toISOString() : new Date().toISOString();
+    const id = beginTaskRecordingItem(taskRecordingTitleFromFileName(file.name), recordedAt);
+    setTaskRecordingSurface("session");
+    setTaskRecordingSeconds(0);
+    setTaskRecordingAudio({
+      id,
+      blob: file,
+      mimeType: file.type || taskRecordingMimeType(file.name) || "audio/mpeg",
+      recordedAt,
+      name: file.name
+    });
+    setTaskRecordingPreview({
+      mode: "transcribing",
+      elapsedSeconds: 0,
+      transcript: "",
+      transcriptSource: null
+    });
+    try {
+      if (!clients?.asr) throw new Error(t("legalDiagnosis.recording.uploadUnavailable"));
+      const encoded = await blobToAudioBase64(file, t("home.asrEmptyAudio"));
+      const result = await clients.asr.transcribe({
+        audioBase64: encoded.audioBase64,
+        mimeType: file.type || taskRecordingMimeType(file.name) || encoded.mimeType,
+        diarizationEnabled: true,
+        fileName: file.name
+      });
+      completeTaskRecording(result.text, result.segments);
+    } catch (error) {
+      setTaskRecordingPreview((current) => ({
+        ...current,
+        mode: "completed",
+        transcript: "",
+        transcriptSource: null,
+        realtimeError: readableError(error)
+      }));
+    }
+  }
+
+  function completeTaskRecording(textValue: string, rawSegments: unknown) {
+    const transcript = textValue.trim();
+    const segments = normalizeLegalStructuredTranscriptSegments(rawSegments);
+    setTaskRecordingPreview((current) => ({
+      ...current,
+      mode: "completed",
+      elapsedSeconds: taskRecordingSeconds,
+      transcript,
+      transcriptSource: transcript ? "asr" : null,
+      ...(segments.length ? { segments } : {})
+    }));
+  }
+
+  function addTaskRecordingToConversation(item: LegalRecordingViewItem) {
+    const file = recordingTranscriptSourceFile(item);
+    if (!file) {
+      setCurrentComposerMediaError(t("legalDiagnosis.recording.library.transcriptPending"));
+      return;
+    }
+    void attachMediaFilesToScope(chatScopeKey, [file]).then(() => inputRef.current?.focus());
+  }
+
+  function renderTaskRecordingPreview(path: string) {
+    if (path !== TASK_RECORDING_TAB_ID) return undefined;
+    const currentState: LegalRecordingPreviewState = {
+      ...taskRecordingPreview,
+      ...(taskRecordingAudio ? { recording: taskRecordingAudio } : {})
+    };
+    const currentItem: LegalRecordingViewItem | null = taskRecordingHasContent(currentState) ? {
+      id: taskRecordingId,
+      label: taskRecordingTitle,
+      createdAt: taskRecordingCreatedAt,
+      state: currentState
+    } : null;
+    const items = [
+      ...taskRecordingHistory.filter((item) => item.id !== taskRecordingId),
+      ...(currentItem ? [currentItem] : [])
+    ];
+    const selectedItem = items.find((item) => item.id === selectedTaskRecordingId)
+      ?? currentItem
+      ?? items[0];
+    const selectedState = selectedItem?.state ?? {
+      mode: "idle" as const,
+      elapsedSeconds: 0,
+      transcript: "",
+      transcriptSource: null
+    };
+    return (
+      <LegalRecordingCollectionPreview
+        surface={taskRecordingSurface}
+        items={items}
+        activeState={selectedState}
+        activeLabel={selectedItem?.label ?? t("legalDiagnosis.recording.preview.recordingTitle")}
+        onStart={() => void startTaskRecording()}
+        onUpload={(file) => void uploadTaskRecording(file)}
+        onSelect={(id) => {
+          setSelectedTaskRecordingId(id);
+          setTaskRecordingSurface("session");
+        }}
+        onRename={(id, name) => {
+          const title = name.trim();
+          if (!title) return;
+          if (id === taskRecordingId) setTaskRecordingTitle(title);
+          setTaskRecordingHistory((current) => current.map((item) => item.id === id ? { ...item, label: title } : item));
+        }}
+        onAddToConversation={addTaskRecordingToConversation}
+        onBack={() => setTaskRecordingSurface("list")}
+        onPause={() => taskRecordingRecorder.pause()}
+        onResume={() => taskRecordingRecorder.resume()}
+        onFinish={() => void finishTaskRecording()}
+      />
+    );
   }
 
 
@@ -3039,23 +3392,40 @@ export function HomePage() {
       aria-label={t("common.preview")}
       aria-pressed={isPreviewPanelOpen}
       title={t("common.preview")}
-      onClick={() => setPreviewPanelOpen((open) => !open)}
+      onClick={toggleWorkspacePreview}
     >
       <PanelRight size={15} aria-hidden="true" />
     </button>
   ) : null;
 
-  const previewPanel = isPreviewPanelOpen && previewSessionKey ? (
+  const recordingToggle = (
+    <button
+      type="button"
+      className="agent-preview-toggle"
+      aria-label={t("legalDiagnosis.recording.library.open")}
+      title={t("legalDiagnosis.recording.library.open")}
+      onClick={openTaskRecordingLibrary}
+    >
+      <AudioLines size={16} strokeWidth={1.8} />
+    </button>
+  );
+
+  const previewPanel = isPreviewPanelOpen && workspacePreviewSessionKey ? (
     <WorkspacePreviewPane
-      key={previewSessionKey}
-      sessionKey={previewSessionKey}
+      key={workspacePreviewSessionKey}
+      sessionKey={workspacePreviewSessionKey}
       rootLabel={previewRootLabel}
       loadDirectory={loadPreviewDirectory}
       loadPreview={loadWorkspaceFilePreview}
       refreshKey={`${currentHistoryVersion}:${isCurrentAgentRunning ? "running" : "idle"}`}
+      previewRevision={`${taskRecordingPreview.mode}:${taskRecordingPreview.transcript.length}:${taskRecordingAudio?.blob.size ?? 0}:${taskRecordingHistory.length}`}
+      openRequest={previewOpenRequest}
+      autoSelectInitialFile={false}
+      renderPreview={renderTaskRecordingPreview}
       onWidthChange={setPreviewPanelWidth}
-      toolbarEnd={previewToggle}
-      emptyDetail={previewRootLabel}
+      toolbarEnd={<>{recordingToggle}{previewToggle}</>}
+      emptyLabel={previewDirectoryEmptyLabel}
+      emptyDetail={previewDirectoryEmptyDetail}
     />
   ) : null;
 
@@ -3064,17 +3434,19 @@ export function HomePage() {
       title={t("home.title")}
       minimumContentWidth={isPreviewPanelOpen ? AGENT_PREVIEW_SPLIT_MIN_WIDTH_PX : AGENT_WORKSPACE_MIN_WIDTH_PX}
       topBarStyle={isPreviewPanelOpen ? { right: `${previewPanelWidth}px` } : undefined}
-      topBar={hasActiveConversation || environmentScope ? (
+      topBar={(
         <div
           className={`agent-conversation-topbar${isPreviewPanelOpen ? " agent-conversation-topbar--preview-open" : ""}`}
           style={{ "--agent-preview-panel-width": `${previewPanelWidth}px` } as CSSProperties}
         >
-          <h1 className="agent-conversation-title" title={hasActiveConversation ? activeConversationTitle : selectedDraftProject?.name}>
-            <span className="agent-conversation-title__text">
-              {hasActiveConversation ? activeConversationTitleDisplay : selectedDraftProject?.name}
-            </span>
-            {hasActiveConversation && activeImTitleDisplay ? <ImChannelTitleIcon slug={activeImTitleDisplay.slug} name={activeImTitleDisplay.channelName} /> : null}
-          </h1>
+          {hasActiveConversation || environmentScope ? (
+            <h1 className="agent-conversation-title" title={hasActiveConversation ? activeConversationTitle : selectedDraftProject?.name}>
+              <span className="agent-conversation-title__text">
+                {hasActiveConversation ? activeConversationTitleDisplay : selectedDraftProject?.name}
+              </span>
+              {hasActiveConversation && activeImTitleDisplay ? <ImChannelTitleIcon slug={activeImTitleDisplay.slug} name={activeImTitleDisplay.channelName} /> : null}
+            </h1>
+          ) : null}
           <div className="agent-conversation-topbar__actions">
             {environmentScope ? (
               <button
@@ -3089,10 +3461,11 @@ export function HomePage() {
                 <SlidersHorizontal size={15} aria-hidden="true" />
               </button>
             ) : null}
+            {!isPreviewPanelOpen ? recordingToggle : null}
             {!isPreviewPanelOpen ? previewToggle : null}
           </div>
         </div>
-      ) : null}
+      )}
       topBarBorder={Boolean(hasActiveConversation || environmentScope) && !isPreviewPanelOpen}
     >
       <div
@@ -3143,9 +3516,10 @@ export function HomePage() {
                     />
                   </div>
                 ) : null}
-                <textarea
-                  ref={inputRef}
+                <ComposerHighlightedTextarea
+                  textareaRef={inputRef}
                   value={composerInput}
+                  highlightedCommands={slashCommandsWithLocal.map((command) => command.command)}
                   placeholder={selectedComposerCommand ? t("home.goal.input") : t("home.input")}
                   rows={3}
                   onChange={(event) => {
@@ -3209,28 +3583,34 @@ export function HomePage() {
                 />
               </div>
             </div>
-            <div className="home-capability-strip" aria-label={t("home.quick.capability")}>
+            <div className="home-legal-entry-grid" aria-label={t("home.capability.legalEntries")}>
               <button
                 type="button"
-                className="home-capability-card"
-                onClick={() => launchLegalDiagnosis(LEGAL_DIAGNOSIS_COMMAND)}
+                className="home-legal-entry-card"
+                onClick={prepareLegalDiagnosis}
               >
-                <span className="home-capability-card__icon home-capability-card__icon--legal" aria-hidden="true">
-                  <Scale size={14} />
+                <span className="home-legal-entry-card__icon home-legal-entry-card__icon--diagnosis" aria-hidden="true">
+                  <Scale size={16} />
                 </span>
-                <strong>{t("home.capability.legalDiagnosis")}</strong>
-                <small>{t("home.capability.legalDiagnosisHint")}</small>
+                <span className="home-legal-entry-card__copy">
+                  <strong>{t("home.capability.legalDiagnosis")}</strong>
+                  <small>{t("home.capability.legalDiagnosisHint")}</small>
+                </span>
+                <span className="home-legal-entry-card__cta">{t("home.capability.tryNow")} <ArrowRight size={13} /></span>
               </button>
               <button
                 type="button"
-                className="home-capability-card"
-                onClick={toggleCapabilityPicker}
+                className="home-legal-entry-card"
+                onClick={prepareLegalSystemDesign}
               >
-                <span className="home-capability-card__icon home-capability-card__icon--more" aria-hidden="true">
-                  <SquareSlash size={14} />
+                <span className="home-legal-entry-card__icon home-legal-entry-card__icon--system" aria-hidden="true">
+                  <Workflow size={16} />
                 </span>
-                <strong>{t("home.capability.more")}</strong>
-                <small>{t("home.capability.moreHint")}</small>
+                <span className="home-legal-entry-card__copy">
+                  <strong>{t("home.capability.legalSystemDesign")}</strong>
+                  <small>{t("home.capability.legalSystemDesignHint")}</small>
+                </span>
+                <span className="home-legal-entry-card__cta">{t("home.capability.tryNow")} <ArrowRight size={13} /></span>
               </button>
             </div>
             <div className="home-empty-status-area">
@@ -4051,6 +4431,56 @@ function toReadableAsrError(error: unknown, t: HomeTranslate = defaultHomeTransl
 
 function readableError(error: unknown): string {
   return error instanceof Error && error.message ? error.message : String(error);
+}
+
+function appendTaskRealtimeTranscript(
+  state: LegalRecordingPreviewState,
+  event: AsrRealtimeTranscriptEvent
+): LegalRecordingPreviewState {
+  const current = state.liveSegments ?? [];
+  const existingIndex = current.findIndex((candidate) => candidate.sentenceId === event.sentenceId);
+  const liveSegments = existingIndex >= 0
+    ? current.map((candidate, index) => index === existingIndex ? event : candidate)
+    : [...current, event];
+  liveSegments.sort((left, right) => left.sentenceId - right.sentenceId);
+  return {
+    ...state,
+    transcript: liveSegments.map((segment) => segment.text.trim()).filter(Boolean).join("\n"),
+    transcriptSource: "asr",
+    liveSegments,
+    realtimeError: undefined
+  };
+}
+
+function taskRecordingMimeType(name: string): string {
+  const extension = name.split(".").pop()?.toLowerCase();
+  if (extension === "m4a" || extension === "mp4") return "audio/mp4";
+  if (extension === "mp3") return "audio/mpeg";
+  if (extension === "wav") return "audio/wav";
+  if (extension === "webm") return "audio/webm";
+  return "";
+}
+
+function taskRecordingNameForMimeType(mimeType: string): string {
+  const normalized = mimeType.toLowerCase();
+  if (normalized.includes("mp4")) return "访谈录音.m4a";
+  if (normalized.includes("mpeg")) return "访谈录音.mp3";
+  if (normalized.includes("wav")) return "访谈录音.wav";
+  return "访谈录音.webm";
+}
+
+function taskRecordingTitleFromFileName(name: string): string {
+  const normalized = name.trim();
+  const lastDot = normalized.lastIndexOf(".");
+  return lastDot > 0 ? normalized.slice(0, lastDot) : normalized || "访谈录音";
+}
+
+function taskRecordingHasContent(state: LegalRecordingPreviewState): boolean {
+  return Boolean(
+    state.recording
+    || state.transcript.trim()
+    || state.mode !== "idle"
+  );
 }
 
 function isPendingAttachmentReadyForUpload(item: PendingAttachment): boolean {

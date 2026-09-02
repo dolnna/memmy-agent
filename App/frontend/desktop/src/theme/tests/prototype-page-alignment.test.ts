@@ -38,7 +38,8 @@ describe("prototype page structure alignment", () => {
     expect(source("pages/app-frame.tsx")).not.toContain('icon: "M"');
     expect(source("pages/home-page.tsx")).toContain("app-frame-page-content home-empty-screen flex flex-col items-center justify-center h-full");
     expect(source("styles.css")).toContain(".home-empty-screen");
-    expect(source("styles.css")).toContain("padding-bottom: 8%;");
+    expect(source("styles.css")).toContain("padding-bottom: max(0px, calc(8% - 60px));");
+    expect(source("styles.css")).toMatch(/\.agent-workspace-layout--preview-open \.home-legal-entry-grid\s*{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/s);
     expect(source("pages/home-page.tsx")).toContain("text-center mb-8");
     expect(source("pages/home-page.tsx")).toContain("home-empty-brand-mascot flex justify-center");
     expect(source("pages/home-page.tsx")).toContain("text-2xl font-bold text-text-ink");

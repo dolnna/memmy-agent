@@ -450,6 +450,7 @@ export type WorkspaceEnvironmentFile = z.infer<typeof WorkspaceEnvironmentFileSc
 export type WorkspaceEnvironmentState = z.infer<typeof WorkspaceEnvironmentStateSchema>;
 export type WorkspaceEnvironmentDiff = z.infer<typeof WorkspaceEnvironmentDiffSchema>;
 export type WorkspaceEnvironmentScope = { kind: "session" | "project"; key: string };
+export type WorkspaceFileScope = WorkspaceEnvironmentScope | { kind: "workspace" };
 export type WorkspaceFileEntry = z.infer<typeof WorkspaceFileEntrySchema>;
 export type WorkspaceFilesListing = z.infer<typeof WorkspaceFilesListingSchema>;
 export type MemmyAgentProject = z.infer<typeof ProjectSchema>;
@@ -663,7 +664,7 @@ export interface MemmyAgentClient {
   listSessions(): Promise<MemmyAgentSessionSummary[]>;
   readWorkspaceEnvironment(scope: WorkspaceEnvironmentScope): Promise<WorkspaceEnvironmentState>;
   readWorkspaceEnvironmentDiff(scope: WorkspaceEnvironmentScope, path: string): Promise<WorkspaceEnvironmentDiff>;
-  listWorkspaceFiles(sessionKey: string, path?: string): Promise<WorkspaceFilesListing>;
+  listWorkspaceFiles(scope: WorkspaceFileScope, path?: string): Promise<WorkspaceFilesListing>;
   switchWorkspaceEnvironmentBranch(
     scope: WorkspaceEnvironmentScope,
     branch: string,
@@ -704,7 +705,7 @@ export interface MemmyAgentClient {
   readLastCompaction(sessionKey: string): Promise<MemmyAgentLastCompaction>;
   renameSession(sessionKey: string, title: string): Promise<MemmyAgentSessionSummary>;
   deleteSession(sessionKey: string): Promise<boolean>;
-  resolveArtifact(path: string, sessionKey: string): Promise<ResolvedAgentArtifact>;
+  resolveArtifact(path: string, scope: string | WorkspaceFileScope): Promise<ResolvedAgentArtifact>;
   revealArtifact(path: string, sessionKey: string): Promise<void>;
   openArtifact(path: string, sessionKey: string): Promise<void>;
   uploadAgentMedia(attachments: UploadAgentMediaInput[]): Promise<UploadedAgentMedia[]>;
@@ -1020,10 +1021,13 @@ class HttpMemmyAgentClient implements MemmyAgentClient {
     );
   }
 
-  async listWorkspaceFiles(sessionKey: string, path = ""): Promise<WorkspaceFilesListing> {
+  async listWorkspaceFiles(scope: WorkspaceFileScope, path = ""): Promise<WorkspaceFilesListing> {
+    const route = scope.kind === "workspace"
+      ? "/api/workspace/files"
+      : `/api/${scope.kind === "session" ? "sessions" : "projects"}/${encodeURIComponent(scope.key)}/workspace/files`;
     const query = path ? `?${new URLSearchParams({ path }).toString()}` : "";
     return this.request(
-      `/api/sessions/${encodeURIComponent(sessionKey)}/workspace/files${query}`,
+      `${route}${query}`,
       WorkspaceFilesListingSchema
     );
   }
@@ -1163,10 +1167,15 @@ class HttpMemmyAgentClient implements MemmyAgentClient {
     return response.deleted;
   }
 
-  async resolveArtifact(path: string, sessionKey: string): Promise<ResolvedAgentArtifact> {
+  async resolveArtifact(path: string, scope: string | WorkspaceFileScope): Promise<ResolvedAgentArtifact> {
+    const body = typeof scope === "string" || scope.kind === "session"
+      ? { path, sessionKey: typeof scope === "string" ? scope : scope.key }
+      : scope.kind === "project"
+        ? { path, projectId: scope.key }
+        : { path, workspace: true };
     return this.request("/api/webui/artifacts/resolve", ResolvedArtifactSchema, {
       method: "POST",
-      body: { path, sessionKey }
+      body
     });
   }
 

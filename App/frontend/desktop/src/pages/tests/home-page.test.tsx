@@ -10,6 +10,7 @@ import { AppProviders } from "../../app/providers.js";
 import { FOCUSED_AGENT_CHAT_STORAGE_KEY } from "../../app/routes.js";
 import type { SlashCommandPaletteItem, SlashCommandStorageLike } from "../agent-command-palette.js";
 import { buildAgentDisplayUnits } from "../agent-thread-messages.js";
+import { recordingTranscriptSourceFile } from "../labor-recording-preview-pane.js";
 import {
   AGENT_RESTART_STATE_STORAGE_KEY,
   AGENT_MEDIA_ACCEPT,
@@ -42,6 +43,7 @@ import {
   requestAgentRestart,
   requestAgentStop,
   replaceSlashQueryAtSelection,
+  resolveDraftProjectForNewTask,
   resolveComposerCommandDraft,
   shouldAcceptAgentStatusResult,
   submitAgentComposerMessage,
@@ -336,16 +338,55 @@ describe("HomePage", () => {
     expect(source).toContain("const activeConversationTitle = state.agent.currentSessionKey");
     expect(source).toContain("const activeImTitleDisplay = imChannelTitleDisplay(activeConversationTitle);");
     expect(source).toContain("formatConversationTitleForDisplay(activeImTitleDisplay?.title ?? activeConversationTitle)");
-    expect(source).toContain("topBar={hasActiveConversation || environmentScope ? (");
+    expect(source).toContain("topBar={(\n        <div");
     expect(source).toContain('className={`agent-conversation-topbar${isPreviewPanelOpen ? " agent-conversation-topbar--preview-open" : ""}`}');
+    expect(source).toContain("{hasActiveConversation || environmentScope ? (");
     expect(source).toContain('title={hasActiveConversation ? activeConversationTitle : selectedDraftProject?.name}');
     expect(source).toContain("{hasActiveConversation ? activeConversationTitleDisplay : selectedDraftProject?.name}");
     expect(source).toContain('{hasActiveConversation && activeImTitleDisplay ? <ImChannelTitleIcon slug={activeImTitleDisplay.slug} name={activeImTitleDisplay.channelName} /> : null}');
+    expect(source).toContain('aria-label={t("legalDiagnosis.recording.library.open")}');
+    expect(source).toContain('onClick={openTaskRecordingLibrary}');
+    expect(source).toContain('openRequest={previewOpenRequest}');
+    expect(source).toContain('renderPreview={renderTaskRecordingPreview}');
+    expect(source).toContain('toolbarEnd={<>{recordingToggle}{previewToggle}</>}');
+    expect(source).toContain('{!isPreviewPanelOpen ? recordingToggle : null}');
+    expect(source).toContain('const [taskRecordingHistory, setTaskRecordingHistory] = useState<LegalRecordingViewItem[]>([]);');
+    expect(source).toContain('const [selectedTaskRecordingId, setSelectedTaskRecordingId] = useState(taskRecordingId);');
+    expect(source).toContain('archiveCurrentTaskRecording();');
+    expect(source).toContain('const selectedItem = items.find((item) => item.id === selectedTaskRecordingId)');
+    expect(source).toContain('const workspacePreviewSessionKey = previewSessionKey');
+    expect(source).toContain('`draft:${state.agent.newChatRequestId}:${selectedDraftProject?.id ?? "standalone"}`');
+    expect(source).toContain('{ kind: "project", key: selectedDraftProject.id }');
+    expect(source).toContain(': { kind: "workspace" }');
+    expect(source).toContain('return client.listWorkspaceFiles(previewFileScope, relativePath);');
+    expect(source).toContain('autoSelectInitialFile={false}');
+    expect(source).toContain('setPreviewOpenRequest(null);');
+    expect(source).toContain('onClick={toggleWorkspacePreview}');
+    expect(source).toContain('const selectedDraftProject = resolveDraftProjectForNewTask(');
+    expect(source).toContain('"workspacePreview.workspaceDirectoryEmpty"');
+    expect(source).not.toContain('const previewIsUncreatedStandalone');
+    expect(source).toContain('emptyLabel={previewDirectoryEmptyLabel}');
+    expect(source).not.toContain('unselectedDetail={previewRootLabel}');
+    expect(source).toContain('storedDraftTarget !== undefined');
     expect(source).toContain("topBarBorder={Boolean(hasActiveConversation || environmentScope) && !isPreviewPanelOpen}");
     expect(source).not.toContain("agent-conversation-titlebar");
     expect(source).toContain("app-frame-page-content agent-conversation-scroll flex-1 overflow-y-auto");
     expect(source).toContain("onScroll={handleAgentConversationScroll}");
     expect(source).toContain('className="agent-conversation-composer"');
+  });
+
+  it("renders two full-width legal entry cards below the new-task composer", () => {
+    const source = readFileSync(homePageSourcePath, "utf8");
+    const styles = readFileSync(stylesSourcePath, "utf8");
+
+    expect(source).toContain('className="home-legal-entry-grid"');
+    expect(source.match(/className="home-legal-entry-card"/g)).toHaveLength(2);
+    expect(source).toContain('t("home.capability.legalDiagnosisHint")');
+    expect(source).toContain('t("home.capability.legalSystemDesignHint")');
+    expect(source).toContain('onClick={prepareLegalSystemDesign}');
+    expect(source).toContain('className="home-legal-entry-card__cta"');
+    expect(styles).toMatch(/\.home-legal-entry-grid\s*{[^}]*width:\s*100%;[^}]*grid-template-columns:/s);
+    expect(styles).toMatch(/\.home-legal-entry-card\s*{[^}]*min-height:\s*104px;/s);
   });
 
   it("keeps preview side-by-side at normal Electron window widths", () => {
@@ -369,6 +410,10 @@ describe("HomePage", () => {
     expect(styles).toMatch(/\.app-frame-content-topbar\s*{[^}]*-webkit-app-region:\s*no-drag;/s);
     expect(styles).toMatch(/\.agent-conversation-title\s*{[^}]*-webkit-app-region:\s*drag;/s);
     expect(styles).toMatch(/\.litrev-preview-pane \*\s*{[^}]*-webkit-app-region:\s*no-drag !important;/s);
+    expect(styles).toMatch(/\.litrev-preview-toolbar__actions\s*{[^}]*right:\s*8px;[^}]*gap:\s*4px;/s);
+    expect(styles).toMatch(/\.litrev-chat-pane\s*{[^}]*container-name:\s*litrev-chat;[^}]*container-type:\s*inline-size;/s);
+    expect(styles).toMatch(/@container litrev-chat \(max-width:\s*420px\)\s*{[\s\S]*?\.legal-record-meter__wave\s*{[^}]*display:\s*none;[\s\S]*?\.legal-record-card__foot\s*{[^}]*flex-wrap:\s*wrap;/s);
+    expect(styles).toMatch(/\.app-frame-main--sidebar-hidden \.litrev-chat-pane__topbar \.agent-conversation-title\s*{[^}]*left:\s*var\(--codex-sidebar-hidden-topbar-padding\);/s);
   });
 
   it("anchors the history DAG popover to the composer width", () => {
@@ -446,6 +491,22 @@ describe("HomePage", () => {
 
     expect(resetNewChatLocalUi).toContain("resetTransientConversationUi();");
     expect(resetNewChatLocalUi).not.toContain("resetComposerDraftUi();");
+  });
+
+  it("never applies the new-task default project to an existing standalone task", () => {
+    const project = {
+      id: "project-memmy",
+      name: "memmy-agent",
+      rootPath: "/workspace/memmy-agent",
+      pinned: false,
+      createdAt: "2026-09-02"
+    };
+    const target = { kind: "project" as const, projectId: project.id };
+
+    expect(resolveDraftProjectForNewTask(null, null, target, [project])).toEqual(project);
+    expect(resolveDraftProjectForNewTask("standalone-chat", "websocket:standalone-chat", target, [project])).toBeNull();
+    expect(resolveDraftProjectForNewTask(null, "websocket:loading-task", target, [project])).toBeNull();
+    expect(resolveDraftProjectForNewTask(null, null, { kind: "standalone" }, [project])).toBeNull();
   });
 
   it("filters projects by name or path and resolves the keyboard-active row", () => {
@@ -1816,6 +1877,31 @@ describe("HomePage", () => {
     await expect(validateAgentMediaFiles([file("old.doc", "application/msword", 1024)])).rejects.toThrow("仅支持 PNG、JPG/JPEG、WebP、GIF 图片，以及 PDF、DOCX、XLSX、PPTX 或文本文件");
     await expect(validateAgentMediaFiles([file("archive.zip", "application/zip", 1024)])).rejects.toThrow("仅支持 PNG、JPG/JPEG、WebP、GIF 图片，以及 PDF、DOCX、XLSX、PPTX 或文本文件");
     await expect(validateAgentMediaFiles([file("unknown.bin", "", 1024)])).rejects.toThrow("仅支持 PNG、JPG/JPEG、WebP、GIF 图片，以及 PDF、DOCX、XLSX、PPTX 或文本文件");
+  });
+
+  it("turns a recording into a stable transcript source file for chat", async () => {
+    const transcript = recordingTranscriptSourceFile({
+      id: "recording-1",
+      label: "上海/工厂访谈.m4a",
+      createdAt: "2026-09-02T09:00:00.000Z",
+      state: {
+        mode: "completed",
+        elapsedSeconds: 20,
+        transcript: "发言人 1  00:00\n公司现有一百名员工。",
+        transcriptSource: "asr"
+      }
+    });
+
+    expect(transcript).not.toBeNull();
+    expect(transcript?.name).toBe("工厂访谈-转写.txt");
+    expect(transcript?.type).toBe("text/plain");
+    expect(transcript?.lastModified).toBe(new Date("2026-09-02T09:00:00.000Z").getTime());
+    expect(await transcript?.text()).toContain("发言人 1  00:00\n公司现有一百名员工。");
+    expect(recordingTranscriptSourceFile({
+      id: "pending",
+      label: "未完成",
+      state: { mode: "recording", elapsedSeconds: 3, transcript: "", transcriptSource: null }
+    })).toBeNull();
   });
 
   it("extracts only image files from pasted clipboard data", () => {

@@ -21,7 +21,8 @@ describe("model config tester", () => {
     ["doubao", "openai-chat-completions"],
     ["openai_compatible", "openai-responses"],
     ["openai_compatible", "openai-embeddings"],
-    ["doubao", "openai-images"]
+    ["doubao", "openai-images"],
+    ["qwen", "dashscope-input-audio-chat"]
   ] as Array<[ModelProvider, ModelEndpointProtocol]>) (
     "uses only GET /models for %s %s",
     async (provider, protocol) => {
@@ -140,7 +141,6 @@ describe("model config tester", () => {
   });
 
   it.each([
-    "dashscope-input-audio-chat",
     "dashscope-multimodal-generation",
     "memmy-account"
   ] as ModelEndpointProtocol[])("fails closed for %s without issuing any HTTP request", async (protocol) => {

@@ -207,7 +207,7 @@ describe("memmy-agent client", () => {
       fetchFn: fetchMock as typeof fetch
     });
 
-    await expect(client.listWorkspaceFiles("websocket:chat-1", "reports")).resolves.toMatchObject({
+    await expect(client.listWorkspaceFiles({ kind: "session", key: "websocket:chat-1" }, "reports")).resolves.toMatchObject({
       root: { kind: "project", label: "Legal project" },
       path: "reports",
       entries: [{
@@ -217,6 +217,16 @@ describe("memmy-agent client", () => {
       }]
     });
     expect(calls).toContain("/api/sessions/websocket%3Achat-1/workspace/files?path=reports");
+
+    await expect(client.listWorkspaceFiles({ kind: "project", key: "project-1" })).resolves.toMatchObject({
+      root: { kind: "project", label: "Legal project" }
+    });
+    expect(calls).toContain("/api/projects/project-1/workspace/files");
+
+    await expect(client.listWorkspaceFiles({ kind: "workspace" })).resolves.toMatchObject({
+      entries: [expect.objectContaining({ name: "diagnosis.md" })]
+    });
+    expect(calls).toContain("/api/workspace/files");
   });
 
   it("prefers env override, then current origin, then local gateway default for base URL", () => {
@@ -631,6 +641,14 @@ describe("memmy-agent client", () => {
         expect(init?.method).toBe("POST");
         expect(init?.headers).toEqual({ "Content-Type": "application/json", Authorization: "Bearer agent-token" });
         const body = JSON.parse(String(init?.body));
+        if (body.projectId === "project-1") {
+          expect(body).toEqual({ path: "README.md", projectId: "project-1" });
+          return json({ ok: true, path: "/workspace/README.md", name: "README.md", kind: "file", media_url: "/api/media/readme" });
+        }
+        if (body.workspace === true) {
+          expect(body).toEqual({ path: "AGENTS.md", workspace: true });
+          return json({ ok: true, path: "/Users/yuan/.memmy/workspace/AGENTS.md", name: "AGENTS.md", kind: "file" });
+        }
         if (body.path === "/Users/yuan/.memmy/workspace") {
           return json({ ok: true, path: "/Users/yuan/.memmy/workspace", name: "workspace", kind: "directory" });
         }
@@ -666,10 +684,20 @@ describe("memmy-agent client", () => {
       name: "workspace",
       kind: "directory"
     });
+    await expect(client.resolveArtifact("README.md", { kind: "project", key: "project-1" })).resolves.toMatchObject({
+      name: "README.md",
+      media_url: "http://127.0.0.1:18980/api/media/readme"
+    });
+    await expect(client.resolveArtifact("AGENTS.md", { kind: "workspace" })).resolves.toMatchObject({
+      name: "AGENTS.md",
+      path: "/Users/yuan/.memmy/workspace/AGENTS.md"
+    });
     await expect(client.revealArtifact("/Users/yuan/result.png", "websocket:chat-1")).resolves.toBeUndefined();
     await expect(client.openArtifact("/Users/yuan/result.png", "websocket:chat-1")).resolves.toBeUndefined();
     expect(calls.map((call) => call.path)).toEqual([
       "/webui/bootstrap",
+      "/api/webui/artifacts/resolve",
+      "/api/webui/artifacts/resolve",
       "/api/webui/artifacts/resolve",
       "/api/webui/artifacts/resolve",
       "/api/webui/artifacts/reveal",

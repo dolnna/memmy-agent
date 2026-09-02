@@ -12,7 +12,7 @@ import { appActions } from "../../state/app-actions.js";
 import { appReducer, createInitialAppState } from "../../state/app-reducer.js";
 import type { AgentTaskView } from "../../state/agent-chat-slice.js";
 import { mockBootstrap } from "./fixtures/bootstrap.js";
-import { AppFrame, TaskArchiveInlineAction, TaskRow, countProjectTasksToArchive, deriveSidebarPlacement, deriveVisibleSidebarPlacement, groupAgentTasks, groupTasksByTime, resolveSidebarAccountSummary, resolveSidebarContextMenuPlacement, resolveSidebarMenuOverlayStyle, resolveSidebarUpdateAction, resolveTaskAncestorGroupKeys, shouldCreateNewAgentDraft, truncateAccountDisplayText } from "../app-frame.js";
+import { AppFrame, TaskArchiveInlineAction, TaskRow, countProjectTasksToArchive, deriveSidebarPlacement, deriveVisibleSidebarPlacement, groupAgentTasks, groupTasksByTime, resolveDefaultNewAgentTarget, resolveSidebarAccountSummary, resolveSidebarContextMenuPlacement, resolveSidebarMenuOverlayStyle, resolveSidebarUpdateAction, resolveTaskAncestorGroupKeys, shouldCreateNewAgentDraft, truncateAccountDisplayText } from "../app-frame.js";
 
 describe("AppFrame", () => {
   it("使用原型 MainLayout 的侧栏图标与导航文案", () => {
@@ -429,6 +429,18 @@ describe("AppFrame", () => {
     expect(source).toContain('dispatch(appActions.navigate("/main"));');
     expect(source).toContain("openNewAgent();");
     expect(source).not.toContain(".newChat(");
+  });
+
+  it("uses the sole saved project as the ordinary new-task default", () => {
+    const onlyProject = project("only-project");
+    expect(resolveDefaultNewAgentTarget([onlyProject])).toEqual({ kind: "project", projectId: onlyProject.id });
+    expect(resolveDefaultNewAgentTarget([])).toEqual({ kind: "standalone" });
+    expect(resolveDefaultNewAgentTarget([onlyProject, project("second-project")])).toEqual({ kind: "standalone" });
+
+    const source = readFileSync(resolve(__dirname, "..", "app-frame.tsx"), "utf8");
+    expect(source).toContain("target ?? resolveDefaultNewAgentTarget(state.agent.projects)");
+    expect(source).toContain('if (path === "/main") {\n      openNewAgent();');
+    expect(source).toContain('openNewAgent({ kind: "standalone" });');
   });
 
   it("does not expose a temporary first-scan sidebar entry", () => {

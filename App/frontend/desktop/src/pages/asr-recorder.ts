@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AsrTranscriptionResponse } from "@memmy/local-api-contracts";
+import {
+  ASR_REALTIME_SAMPLE_RATE,
+  type AsrRealtimeTranscriptEvent,
+  type AsrTranscriptionInput,
+  type AsrTranscriptionResponse
+} from "@memmy/local-api-contracts";
 import type { AsrClient } from "../api/asr-client.js";
 import { formatMessage, type MessageKey, zhCNMessages } from "../i18n/messages.js";
 
@@ -29,7 +34,22 @@ export interface EncodedAudio {
 
 export interface AsrRecorderOptions {
   emptyAudioMessage?: string;
+  onAudioCaptured?: (audio: { blob: Blob; mimeType: string; durationMs?: number; recordedAt: string }) => void;
+  transcribeOptions?: AsrRecorderTranscribeOptions;
+  realtime?: AsrRecorderRealtimeOptions;
 }
+
+export interface AsrRecorderRealtimeOptions {
+  enabled: boolean;
+  languageHints?: string[];
+  onTranscript: (event: AsrRealtimeTranscriptEvent) => void;
+  onError?: (error: Error) => void;
+}
+
+export type AsrRecorderTranscribeOptions = Omit<
+  AsrTranscriptionInput,
+  "audioBase64" | "mimeType" | "durationMs"
+>;
 
 export interface MicrophoneAccessBridge {
   getMicrophoneAccessStatus(): Promise<MicrophoneAccessStatus>;
@@ -63,12 +83,22 @@ export function microphonePermissionDeniedMessageKey(
 }
 
 export function useAsrRecorder(asrClient?: AsrClient, options: AsrRecorderOptions = {}): AsrRecorder {
+  const emptyAudioMessage = options.emptyAudioMessage;
+  const onAudioCaptured = options.onAudioCaptured;
+  const diarizationEnabled = options.transcribeOptions?.diarizationEnabled;
+  const fileName = options.transcribeOptions?.fileName;
+  const speakerCount = options.transcribeOptions?.speakerCount;
+  const realtimeEnabled = options.realtime?.enabled === true;
+  const realtimeLanguageHints = options.realtime?.languageHints;
+  const onRealtimeTranscript = options.realtime?.onTranscript;
+  const onRealtimeError = options.realtime?.onError;
   const [status, setStatus] = useState<AsrRecorderStatus>("idle");
   const [error, setError] = useState<Error | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const startedAtRef = useRef<number | null>(null);
+  const realtimeCaptureRef = useRef<RealtimeAudioCapture | null>(null);
 
   const cancel = useCallback(() => {
     stopRecorderSilently(recorderRef.current);
@@ -77,6 +107,8 @@ export function useAsrRecorder(asrClient?: AsrClient, options: AsrRecorderOption
     startedAtRef.current = null;
     stopStream(streamRef.current);
     streamRef.current = null;
+    void realtimeCaptureRef.current?.close();
+    realtimeCaptureRef.current = null;
     setStatus("idle");
   }, []);
 
@@ -106,7 +138,7 @@ export function useAsrRecorder(asrClient?: AsrClient, options: AsrRecorderOption
       setStatus("starting");
       let stream: MediaStream;
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream = await getMonoMicrophoneStream(navigator.mediaDevices);
       } catch (mediaError) {
         if (isMicrophonePermissionDenial(mediaError)) {
           throw new MicrophonePermissionError("denied");
@@ -122,6 +154,19 @@ export function useAsrRecorder(asrClient?: AsrClient, options: AsrRecorderOption
           chunksRef.current.push(event.data);
         }
       };
+      if (realtimeEnabled && onRealtimeTranscript) {
+        try {
+          realtimeCaptureRef.current = await startRealtimeAudioCapture({
+            asrClient,
+            stream,
+            onTranscript: onRealtimeTranscript,
+            ...(onRealtimeError ? { onError: onRealtimeError } : {}),
+            ...(realtimeLanguageHints ? { languageHints: realtimeLanguageHints } : {})
+          });
+        } catch (realtimeError) {
+          onRealtimeError?.(realtimeError instanceof Error ? realtimeError : new Error(String(realtimeError)));
+        }
+      }
       recorder.start();
       startedAtRef.current = Date.now();
       setStatus("recording");
@@ -137,12 +182,13 @@ export function useAsrRecorder(asrClient?: AsrClient, options: AsrRecorderOption
       setStatus("error");
       throw nextError;
     }
-  }, [asrClient, cancel]);
+  }, [asrClient, cancel, onRealtimeError, onRealtimeTranscript, realtimeEnabled, realtimeLanguageHints]);
 
   const pause = useCallback(() => {
     const recorder = recorderRef.current;
     if (!recorder || recorder.state !== "recording") return;
     recorder.pause();
+    realtimeCaptureRef.current?.pause();
     setStatus("paused");
   }, []);
 
@@ -150,6 +196,7 @@ export function useAsrRecorder(asrClient?: AsrClient, options: AsrRecorderOption
     const recorder = recorderRef.current;
     if (!recorder || recorder.state !== "paused") return;
     recorder.resume();
+    realtimeCaptureRef.current?.resume();
     setStatus("recording");
   }, []);
 
@@ -165,19 +212,38 @@ export function useAsrRecorder(asrClient?: AsrClient, options: AsrRecorderOption
 
     try {
       setStatus("transcribing");
-      const durationMs = startedAtRef.current ? Math.max(0, Date.now() - startedAtRef.current) : undefined;
+      const endedAtMs = Date.now();
+      const recordingStartedAtMs = startedAtRef.current;
+      const durationMs = recordingStartedAtMs ? Math.max(0, endedAtMs - recordingStartedAtMs) : undefined;
+      const realtimeCapture = realtimeCaptureRef.current;
+      realtimeCaptureRef.current = null;
+      await realtimeCapture?.finish().catch((realtimeError: unknown) => {
+        onRealtimeError?.(realtimeError instanceof Error ? realtimeError : new Error(String(realtimeError)));
+      });
       const blob = await stopRecorder(recorder, chunksRef.current);
+      if (blob.size > 0) {
+        onAudioCaptured?.({
+          blob,
+          mimeType: blob.type || recorder.mimeType || "audio/webm",
+          recordedAt: new Date(recordingStartedAtMs ?? endedAtMs).toISOString(),
+          ...(durationMs === undefined ? {} : { durationMs })
+        });
+      }
+      chunksRef.current = [];
       recorderRef.current = null;
       stopStream(streamRef.current);
       streamRef.current = null;
       startedAtRef.current = null;
-      const encoded = await blobToAudioBase64(blob, options.emptyAudioMessage);
-      const result = await asrClient.transcribe({
+      const encoded = await blobToAudioBase64(blob, emptyAudioMessage);
+      const transcribeInput: AsrTranscriptionInput & AsrRecorderTranscribeOptions = {
         audioBase64: encoded.audioBase64,
         mimeType: encoded.mimeType,
-        durationMs
-      });
-      chunksRef.current = [];
+        durationMs,
+        ...(diarizationEnabled === undefined ? {} : { diarizationEnabled }),
+        ...(fileName ? { fileName } : {}),
+        ...(speakerCount === undefined ? {} : { speakerCount })
+      };
+      const result = await asrClient.transcribe(transcribeInput);
       setStatus("idle");
       return result;
     } catch (caught) {
@@ -188,7 +254,7 @@ export function useAsrRecorder(asrClient?: AsrClient, options: AsrRecorderOption
       streamRef.current = null;
       throw nextError;
     }
-  }, [asrClient, options.emptyAudioMessage]);
+  }, [asrClient, diarizationEnabled, emptyAudioMessage, fileName, onAudioCaptured, onRealtimeError, speakerCount]);
 
   return {
     status,
@@ -202,6 +268,131 @@ export function useAsrRecorder(asrClient?: AsrClient, options: AsrRecorderOption
     cancel,
     finishAndTranscribe
   };
+}
+
+interface RealtimeAudioCapture {
+  pause(): void;
+  resume(): void;
+  finish(): Promise<void>;
+  close(): Promise<void>;
+}
+
+interface StartRealtimeAudioCaptureOptions {
+  asrClient: AsrClient;
+  stream: MediaStream;
+  languageHints?: string[];
+  onTranscript: (event: AsrRealtimeTranscriptEvent) => void;
+  onError?: (error: Error) => void;
+}
+
+async function startRealtimeAudioCapture(
+  options: StartRealtimeAudioCaptureOptions
+): Promise<RealtimeAudioCapture> {
+  const session = await options.asrClient.startRealtime({
+    ...(options.languageHints ? { languageHints: options.languageHints } : {}),
+    onTranscript: options.onTranscript,
+    ...(options.onError ? { onError: options.onError } : {})
+  });
+  console.info("[asr-realtime] renderer session ready");
+  let context: AudioContext;
+  try {
+    context = new AudioContext();
+  } catch (error) {
+    session.close();
+    throw error;
+  }
+  if (context.state === "suspended") await context.resume();
+  const source = context.createMediaStreamSource(options.stream);
+  const processor = context.createScriptProcessor(4096, 1, 1);
+  const silentOutput = context.createGain();
+  silentOutput.gain.value = 0;
+  let paused = false;
+  let stopped = false;
+  let frameCount = 0;
+  processor.onaudioprocess = (event) => {
+    if (paused || stopped) return;
+    const samples = event.inputBuffer.getChannelData(0);
+    const pcm = resampleToPcm16(samples, context.sampleRate, ASR_REALTIME_SAMPLE_RATE);
+    frameCount += 1;
+    if (frameCount === 1) {
+      console.info(
+        `[asr-realtime] renderer first PCM frame inputRate=${context.sampleRate} outputRate=${ASR_REALTIME_SAMPLE_RATE} bytes=${pcm.byteLength}`
+      );
+    }
+    session.sendAudio(pcm);
+  };
+  source.connect(processor);
+  processor.connect(silentOutput);
+  silentOutput.connect(context.destination);
+
+  const disconnect = async () => {
+    if (stopped) return;
+    stopped = true;
+    processor.onaudioprocess = null;
+    source.disconnect();
+    processor.disconnect();
+    silentOutput.disconnect();
+    await context.close().catch(() => undefined);
+  };
+
+  return {
+    pause() { paused = true; },
+    resume() { paused = false; },
+    async finish() {
+      await disconnect();
+      await session.finish();
+    },
+    async close() {
+      await disconnect();
+      session.close();
+    }
+  };
+}
+
+/** Resamples Web Audio float samples and encodes signed 16-bit little-endian PCM. */
+export function resampleToPcm16(samples: Float32Array, inputRate: number, outputRate: number): Uint8Array {
+  if (!Number.isFinite(inputRate) || !Number.isFinite(outputRate) || inputRate <= 0 || outputRate <= 0) {
+    return new Uint8Array();
+  }
+  const ratio = inputRate / outputRate;
+  const outputLength = Math.max(0, Math.floor(samples.length / ratio));
+  const buffer = new ArrayBuffer(outputLength * 2);
+  const view = new DataView(buffer);
+  for (let index = 0; index < outputLength; index += 1) {
+    const start = index * ratio;
+    const end = Math.min(samples.length, (index + 1) * ratio);
+    let value = 0;
+    if (ratio >= 1) {
+      const first = Math.floor(start);
+      const last = Math.max(first + 1, Math.ceil(end));
+      for (let sampleIndex = first; sampleIndex < last && sampleIndex < samples.length; sampleIndex += 1) {
+        value += samples[sampleIndex] ?? 0;
+      }
+      value /= Math.max(1, Math.min(last, samples.length) - first);
+    } else {
+      const left = Math.floor(start);
+      const right = Math.min(samples.length - 1, left + 1);
+      const fraction = start - left;
+      value = (samples[left] ?? 0) * (1 - fraction) + (samples[right] ?? 0) * fraction;
+    }
+    const clamped = Math.max(-1, Math.min(1, value));
+    view.setInt16(index * 2, clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff, true);
+  }
+  return new Uint8Array(buffer);
+}
+
+async function getMonoMicrophoneStream(mediaDevices: MediaDevices): Promise<MediaStream> {
+  try {
+    return await mediaDevices.getUserMedia({ audio: { channelCount: 1 } });
+  } catch (error) {
+    if (!isMonoChannelConstraintUnsupported(error)) throw error;
+    return mediaDevices.getUserMedia({ audio: true });
+  }
+}
+
+function isMonoChannelConstraintUnsupported(error: unknown): boolean {
+  if (!(error instanceof DOMException) && !(error instanceof Error)) return false;
+  return error.name === "OverconstrainedError" || /channel\s*count|channelCount/i.test(error.message);
 }
 
 export async function ensureMicrophoneAccess(
@@ -276,7 +467,7 @@ export function mergeVoiceTranscript(current: string, transcript: string): strin
  * @returns The MediaRecorder init options.
  */
 function pickRecorderOptions(): MediaRecorderOptions {
-  const candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"];
+  const candidates = ["audio/mp4;codecs=mp4a.40.2", "audio/mp4", "audio/webm;codecs=opus", "audio/webm"];
   const mimeType = candidates.find((candidate) => MediaRecorder.isTypeSupported(candidate));
   return mimeType ? { mimeType } : {};
 }

@@ -631,7 +631,7 @@ describe("cloud client", () => {
     });
   });
 
-  it("posts account-mode ASR transcription requests to Playground with bearer token", async () => {
+  it("passes speaker-diarization fields and structured segments through the account cloud API", async () => {
     const requests: Array<{ path: string; body: unknown; authorization: string | undefined }> = [];
     server = createServer(async (request, response) => {
       requests.push({
@@ -646,7 +646,15 @@ describe("cloud client", () => {
         data: {
           text: "你好，Memmy",
           modelId: "qwen3-asr-flash",
-          provider: "aliyun"
+          provider: "aliyun",
+          segments: [{
+            id: "segment-1",
+            speakerId: 0,
+            startMs: 0,
+            endMs: 900,
+            text: "你好，Memmy",
+            words: [{ text: "你好", startMs: 0, endMs: 400 }]
+          }]
         }
       });
     });
@@ -661,13 +669,24 @@ describe("cloud client", () => {
       uuid: "cloud.login.uuid",
       audioBase64: "UklGRg==",
       mimeType: "audio/wav",
-      durationMs: 1200
+      durationMs: 1200,
+      fileName: "访谈.wav",
+      diarizationEnabled: true,
+      speakerCount: 2
     });
 
     expect(result).toEqual({
       text: "你好，Memmy",
       modelId: "qwen3-asr-flash",
-      provider: "aliyun"
+      provider: "aliyun",
+      segments: [{
+        id: "segment-1",
+        speakerId: 0,
+        startMs: 0,
+        endMs: 900,
+        text: "你好，Memmy",
+        words: [{ text: "你好", startMs: 0, endMs: 400 }]
+      }]
     });
     expect(requests).toEqual([
       {
@@ -675,7 +694,10 @@ describe("cloud client", () => {
         body: {
           audioBase64: "UklGRg==",
           mimeType: "audio/wav",
-          durationMs: 1200
+          durationMs: 1200,
+          fileName: "访谈.wav",
+          diarizationEnabled: true,
+          speakerCount: 2
         },
         authorization: "Bearer cloud.login.uuid"
       }

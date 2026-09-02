@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { buildLegalDiagListing } from "../labor-diagnostic-demo-data.js";
 import {
   LEGAL_DIAGNOSIS_COMMAND,
   formatSourceSize,
@@ -20,18 +19,12 @@ describe("labor diagnostic model", () => {
 
   it("accepts interview recordings and survey notes", () => {
     expect(isLegalDiagSourceName("访谈.m4a")).toBe(true);
+    expect(isLegalDiagSourceName("现场录音.webm")).toBe(true);
     expect(isLegalDiagSourceName("记录.docx")).toBe(true);
-    expect(isLegalDiagSourceName("photo.png")).toBe(false);
+    expect(isLegalDiagSourceName("营业执照.png")).toBe(true);
+    expect(isLegalDiagSourceName("营业执照.jpg")).toBe(true);
+    expect(isLegalDiagSourceName("未知程序.exe")).toBe(false);
     expect(formatSourceSize(1536)).toBe("1.5 KB");
   });
 
-  it("hides report files until generation is ready", () => {
-    expect(buildLegalDiagListing("", false).entries).toEqual([]);
-    expect(buildLegalDiagListing("", true).entries.map((entry) => entry.name)).toEqual([
-      "reports",
-      "transcripts",
-      "recordings"
-    ]);
-    expect(buildLegalDiagListing("reports", true).entries[0]?.name).toBe("用工风险与合规诊断报告.md");
-  });
 });

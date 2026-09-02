@@ -12,6 +12,7 @@ import {
   Folder,
   PanelLeftClose,
   PanelLeftOpen,
+  Search,
   X
 } from "lucide-react";
 import type { WorkspaceFileEntry, WorkspaceFilesListing } from "../api/memmy-agent-client.js";
@@ -52,10 +53,20 @@ export interface WorkspacePreviewPaneProps {
   loadDirectory: (sessionKey: string, relativePath: string) => Promise<WorkspaceFilesListing>;
   loadPreview: (relativePath: string) => Promise<WorkspacePreviewContent | null>;
   refreshKey?: string | number;
+  openRequest?: {
+    path: string;
+    requestId: string | number;
+    fileTreeOpen?: boolean;
+  } | null;
+  previewRevision?: string | number;
+  autoSelectInitialFile?: boolean;
+  renderPreview?: (path: string, content: WorkspacePreviewContent | null) => ReactNode | undefined;
   onWidthChange?: (width: number) => void;
   toolbarEnd?: ReactNode;
   emptyLabel?: string;
   emptyDetail?: string;
+  unselectedLabel?: string;
+  unselectedDetail?: string;
 }
 
 function fileNameFromPath(path: string): string {
@@ -115,6 +126,7 @@ export function WorkspacePreviewPane(props: WorkspacePreviewPaneProps): ReactNod
   const listingsByDirectoryRef = useRef<Record<string, WorkspaceFilesListing | undefined>>({});
   const openPreviewTabsRef = useRef<string[]>([]);
   const lastRefreshKeyRef = useRef(props.refreshKey);
+  const lastOpenRequestIdRef = useRef<string | number | null>(null);
   loadDirectoryRef.current = props.loadDirectory;
   loadPreviewRef.current = props.loadPreview;
 
@@ -126,6 +138,7 @@ export function WorkspacePreviewPane(props: WorkspacePreviewPaneProps): ReactNod
   const [previewContent, setPreviewContent] = useState<WorkspacePreviewContent | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [fileTreeOpen, setFileTreeOpen] = useState(true);
+  const [fileFilter, setFileFilter] = useState("");
   const [collapsedFolders, setCollapsedFolders] = useState<Record<string, boolean>>({});
   const [workspaceWidth, setWorkspaceWidth] = useState<number | null>(null);
   listingsByDirectoryRef.current = listingsByDirectory;
@@ -228,9 +241,12 @@ export function WorkspacePreviewPane(props: WorkspacePreviewPaneProps): ReactNod
     setOpenPreviewTabs([]);
     setPreviewContent(null);
     setCollapsedFolders({});
+    setFileFilter("");
+    lastOpenRequestIdRef.current = null;
     void requestDirectory(props.sessionKey, ROOT_DIRECTORY_KEY, generation).then((rootListing) => {
       if (!rootListing || requestGenerationRef.current !== generation) return;
-      return selectInitialPreview(props.sessionKey, rootListing, generation);
+      if (props.autoSelectInitialFile === false) return;
+      return selectInitialPreview(props.sessionKey, rootListing, generation, true);
     }).catch(() => {
       if (requestGenerationRef.current !== generation) return;
       setListingsByDirectory({
@@ -246,7 +262,7 @@ export function WorkspacePreviewPane(props: WorkspacePreviewPaneProps): ReactNod
     return () => {
       if (requestGenerationRef.current === generation) requestGenerationRef.current += 1;
     };
-  }, [props.rootLabel, props.sessionKey, requestDirectory, selectInitialPreview]);
+  }, [props.autoSelectInitialFile, props.rootLabel, props.sessionKey, requestDirectory, selectInitialPreview]);
 
   useEffect(() => {
     if (Object.is(lastRefreshKeyRef.current, props.refreshKey)) return;
@@ -262,6 +278,7 @@ export function WorkspacePreviewPane(props: WorkspacePreviewPaneProps): ReactNod
     for (const directory of directories) {
       void requestDirectory(props.sessionKey, directory, generation).then((listing) => {
         if (directory !== ROOT_DIRECTORY_KEY || !listing) return;
+        if (props.autoSelectInitialFile === false) return;
         return selectInitialPreview(props.sessionKey, listing, generation, true);
       }).catch(() => {
         if (directory === ROOT_DIRECTORY_KEY && requestGenerationRef.current === generation) {
@@ -269,7 +286,20 @@ export function WorkspacePreviewPane(props: WorkspacePreviewPaneProps): ReactNod
         }
       });
     }
-  }, [props.refreshKey, props.sessionKey, requestDirectory, selectInitialPreview]);
+  }, [props.autoSelectInitialFile, props.refreshKey, props.sessionKey, requestDirectory, selectInitialPreview]);
+
+  useEffect(() => {
+    const request = props.openRequest;
+    if (!request || Object.is(lastOpenRequestIdRef.current, request.requestId)) return;
+    lastOpenRequestIdRef.current = request.requestId;
+    setPreviewPath(request.path);
+    if (request.fileTreeOpen !== undefined) setFileTreeOpen(request.fileTreeOpen);
+    const nextTabs = openPreviewTabsRef.current.includes(request.path)
+      ? openPreviewTabsRef.current
+      : [...openPreviewTabsRef.current, request.path];
+    openPreviewTabsRef.current = nextTabs;
+    setOpenPreviewTabs(nextTabs);
+  }, [props.openRequest]);
 
   useEffect(() => {
     const generation = requestGenerationRef.current;
@@ -288,7 +318,7 @@ export function WorkspacePreviewPane(props: WorkspacePreviewPaneProps): ReactNod
       if (!stale && requestGenerationRef.current === generation) setPreviewLoading(false);
     });
     return () => { stale = true; };
-  }, [previewPath]);
+  }, [previewPath, props.previewRevision]);
 
   function selectPreviewFile(path: string) {
     setPreviewPath(path);
@@ -310,6 +340,19 @@ export function WorkspacePreviewPane(props: WorkspacePreviewPaneProps): ReactNod
       const generation = requestGenerationRef.current;
       void requestDirectory(props.sessionKey, entry.path, generation).catch(() => undefined);
     }
+  }
+
+  const normalizedFileFilter = fileFilter.trim().toLocaleLowerCase();
+
+  function entryMatchesFilter(entry: WorkspaceFileEntry): boolean {
+    if (!normalizedFileFilter) return true;
+    if (entry.name.toLocaleLowerCase().includes(normalizedFileFilter)) return true;
+    if (entry.kind !== "directory") return false;
+    return (listingsByDirectory[entry.path]?.entries ?? []).some(entryMatchesFilter);
+  }
+
+  function visibleEntries(entries: WorkspaceFileEntry[]): WorkspaceFileEntry[] {
+    return normalizedFileFilter ? entries.filter(entryMatchesFilter) : entries;
   }
 
   function renderEntry(entry: WorkspaceFileEntry): ReactNode {
@@ -340,7 +383,7 @@ export function WorkspacePreviewPane(props: WorkspacePreviewPaneProps): ReactNod
           <div className="litrev-file-folder__children">
             {loadingDirectories[entry.path] && childListing === undefined
               ? <span className="litrev-file-item">{t("common.loading")}</span>
-              : (childListing?.entries ?? []).map(renderEntry)}
+              : visibleEntries(childListing?.entries ?? []).map(renderEntry)}
           </div>
         ) : null}
       </div>
@@ -351,6 +394,7 @@ export function WorkspacePreviewPane(props: WorkspacePreviewPaneProps): ReactNod
   const hasEntries = Boolean(rootListing?.entries.length);
   const rootLoading = rootListing === undefined;
   const resolvedRootLabel = rootListing?.root.label || props.rootLabel;
+  const customPreview = previewPath ? props.renderPreview?.(previewPath, previewContent) : undefined;
 
   return (
     <>
@@ -365,11 +409,9 @@ export function WorkspacePreviewPane(props: WorkspacePreviewPaneProps): ReactNod
       />
       <aside ref={previewPaneRef} className="litrev-preview-pane litrev-preview-pane--lifted" style={previewResize.sidebarStyle}>
         <header className="litrev-preview-toolbar">
-          {hasEntries ? (
-            <button type="button" className="litrev-file-browser__toggle" aria-label={t("workspacePreview.toggleFiles")} aria-expanded={fileTreeOpen} onClick={() => setFileTreeOpen((open) => !open)}>
-              {fileTreeOpen ? <PanelLeftClose size={16} /> : <PanelLeftOpen size={16} />}
-            </button>
-          ) : null}
+          <button type="button" className="litrev-file-browser__toggle" aria-label={t("workspacePreview.toggleFiles")} aria-expanded={fileTreeOpen} onClick={() => setFileTreeOpen((open) => !open)}>
+            {fileTreeOpen ? <PanelLeftClose size={16} /> : <PanelLeftOpen size={16} />}
+          </button>
           <div className="litrev-file-tabs" role="tablist" aria-label={t("workspacePreview.openFiles")}>
             {openPreviewTabs.map((path) => {
               const active = previewPath === path;
@@ -384,10 +426,34 @@ export function WorkspacePreviewPane(props: WorkspacePreviewPaneProps): ReactNod
           {props.toolbarEnd ? <div className="litrev-preview-toolbar__actions">{props.toolbarEnd}</div> : null}
         </header>
         <div className="litrev-preview-body">
-          <aside className={`litrev-file-browser${fileTreeOpen && hasEntries ? "" : " litrev-file-browser--collapsed"}`} style={fileBrowserResize.sidebarStyle}>
-            {fileTreeOpen && hasEntries ? <nav className="litrev-file-list">{(rootListing?.entries ?? []).map(renderEntry)}</nav> : null}
+          <aside className={`litrev-file-browser${fileTreeOpen ? "" : " litrev-file-browser--collapsed"}`} style={fileBrowserResize.sidebarStyle}>
+            {fileTreeOpen ? (
+              <>
+                <div className="litrev-file-browser__header">
+                  <label className="litrev-file-browser__filter">
+                    <Search size={13} aria-hidden="true" />
+                    <input
+                      type="search"
+                      value={fileFilter}
+                      aria-label={t("workspacePreview.filterFiles")}
+                      placeholder={t("workspacePreview.filterFiles")}
+                      onChange={(event) => setFileFilter(event.target.value)}
+                    />
+                  </label>
+                </div>
+                <nav className="litrev-file-list">
+                  {rootLoading
+                    ? <span className="litrev-file-browser__no-match">{t("common.loading")}</span>
+                    : visibleEntries(rootListing?.entries ?? []).length
+                      ? visibleEntries(rootListing?.entries ?? []).map(renderEntry)
+                      : <span className="litrev-file-browser__no-match">{t(normalizedFileFilter
+                        ? "workspacePreview.noMatches"
+                        : "workspacePreview.emptyFolder")}</span>}
+                </nav>
+              </>
+            ) : null}
           </aside>
-          {fileTreeOpen && hasEntries ? (
+          {fileTreeOpen ? (
             <SidebarResizeHandle
               label={t("workspacePreview.resizeFiles")}
               width={fileBrowserResize.width}
@@ -399,7 +465,9 @@ export function WorkspacePreviewPane(props: WorkspacePreviewPaneProps): ReactNod
             />
           ) : null}
           <section className="litrev-preview-main">
-            {previewPath && previewContent ? (
+            {previewPath && customPreview !== undefined ? (
+              customPreview
+            ) : previewPath && previewContent ? (
               <article className="litrev-preview-document">
                 <div className="litrev-preview-crumb">{resolvedRootLabel} › {fileNameFromPath(previewPath)}</div>
                 <h2>{previewContent.title}</h2>
@@ -408,8 +476,16 @@ export function WorkspacePreviewPane(props: WorkspacePreviewPaneProps): ReactNod
             ) : (
               <div className="litrev-preview-empty">
                 <Folder size={28} aria-hidden="true" />
-                <strong>{rootLoading || previewLoading ? t("common.loading") : props.emptyLabel ?? t("workspacePreview.noFiles")}</strong>
-                <small>{treeLoadFailed ? resolvedRootLabel : props.emptyDetail ?? resolvedRootLabel}</small>
+                <strong>{rootLoading || previewLoading
+                  ? t("common.loading")
+                  : hasEntries
+                    ? props.unselectedLabel ?? t("workspacePreview.selectFile")
+                    : props.emptyLabel ?? t("workspacePreview.noFiles")}</strong>
+                <small>{treeLoadFailed
+                  ? resolvedRootLabel
+                  : hasEntries
+                    ? props.unselectedDetail ?? resolvedRootLabel
+                    : props.emptyDetail ?? resolvedRootLabel}</small>
               </div>
             )}
           </section>

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import YAML from "yaml";
 import { describe, expect, it } from "vitest";
+import { DASHSCOPE_DIARIZED_ASR_MODEL } from "../../adapters/outbound/asr/dashscope-file-transcription.js";
 import { createMemmyConfigWriter } from "../../infrastructure/memmy-config/index.js";
 import { createAsrService } from "../asr-service.js";
 
@@ -77,6 +78,7 @@ describe("asr service", () => {
 
   it("transcribes account-mode audio through Playground cloud service without local ASR key", async () => {
     const fixture = catalogFixture("account");
+    const cloudInputs: unknown[] = [];
     const service = createAsrService({
       bootstrapRepository: {
         getAppSettings: () => ({ userMode: "account" })
@@ -87,11 +89,22 @@ describe("asr service", () => {
       },
       memmyConfigWriter: createMemmyConfigWriter({ configPath: fixture.configPath }),
       cloudClient: {
-        transcribeAudio: async (input) => ({
-          text: `${input.audioBase64}:云端识别`,
-          modelId: "qwen3-asr-flash",
-          provider: "aliyun"
-        })
+        transcribeAudio: async (input) => {
+          cloudInputs.push(input);
+          return {
+            text: `${input.audioBase64}:云端识别`,
+            modelId: "qwen3-asr-flash",
+            provider: "aliyun",
+            segments: [{
+              id: "cloud-segment-1",
+              speakerId: 1,
+              startMs: 10,
+              endMs: 20,
+              text: "云端识别",
+              words: []
+            }]
+          };
+        }
       },
       fetch: async () => {
         throw new Error("direct fetch should not be used");
@@ -103,15 +116,169 @@ describe("asr service", () => {
       service.transcribe({
         audioBase64: "BASE64",
         mimeType: "audio/webm",
-        durationMs: 800
+        durationMs: 800,
+        fileName: "访谈.webm",
+        diarizationEnabled: true,
+        speakerCount: 2
       })
     ).resolves.toEqual({
       text: "BASE64:云端识别",
       modelId: "account-asr",
       provider: "memmy_account",
       source: "account",
-      transcribedAt: "2026-06-15T10:05:00.000Z"
+      transcribedAt: "2026-06-15T10:05:00.000Z",
+      segments: [{
+        id: "cloud-segment-1",
+        speakerId: 1,
+        startMs: 10,
+        endMs: 20,
+        text: "云端识别",
+        words: []
+      }]
     });
+    expect(cloudInputs).toEqual([{
+      uuid: "cloud-login-jwt",
+      audioBase64: "BASE64",
+      mimeType: "audio/webm",
+      durationMs: 800,
+      fileName: "访谈.webm",
+      diarizationEnabled: true,
+      speakerCount: 2
+    }]);
+    fixture.dispose();
+  });
+
+  it("routes BYOK speaker diarization through the fixed file-transcription model", async () => {
+    const fixture = catalogFixture("byok");
+    const diarizedCalls: unknown[] = [];
+    const service = createAsrService({
+      bootstrapRepository: { getAppSettings: () => ({ userMode: "byok" }) },
+      accountSessionRepository: {
+        get: () => ({ authenticated: false }) as any,
+        getCloudUuid: () => null
+      },
+      memmyConfigWriter: createMemmyConfigWriter({ configPath: fixture.configPath }),
+      cloudClient: {
+        transcribeAudio: async () => {
+          throw new Error("cloud path should not be used");
+        }
+      },
+      transcribeDiarized: async (options) => {
+        diarizedCalls.push(options);
+        return {
+          text: "发言人内容",
+          segments: [{
+            id: "segment-1",
+            speakerId: 0,
+            startMs: 100,
+            endMs: 500,
+            text: "发言人内容",
+            words: [{ text: "内容", startMs: 200, endMs: 500 }]
+          }]
+        };
+      },
+      now: () => "2026-06-15T10:10:00.000Z"
+    });
+
+    await expect(service.transcribe({
+      audioBase64: "UklGRg==",
+      mimeType: "audio/wav",
+      fileName: "interview.wav",
+      diarizationEnabled: true,
+      speakerCount: 3
+    })).resolves.toEqual({
+      text: "发言人内容",
+      modelId: DASHSCOPE_DIARIZED_ASR_MODEL,
+      provider: "dashscope",
+      source: "byok",
+      transcribedAt: "2026-06-15T10:10:00.000Z",
+      segments: [{
+        id: "segment-1",
+        speakerId: 0,
+        startMs: 100,
+        endMs: 500,
+        text: "发言人内容",
+        words: [{ text: "内容", startMs: 200, endMs: 500 }]
+      }]
+    });
+    expect(diarizedCalls).toHaveLength(1);
+    expect(diarizedCalls[0]).toMatchObject({
+      input: {
+        fileName: "interview.wav",
+        diarizationEnabled: true,
+        speakerCount: 3
+      },
+      provider: {
+        provider: "dashscope",
+        endpointId: "asr",
+        apiKey: "endpoint-secret"
+      }
+    });
+    fixture.dispose();
+  });
+
+  it("opens real-time recognition with the resolved BYOK DashScope key", async () => {
+    const fixture = catalogFixture("byok");
+    const realtimeCalls: unknown[] = [];
+    const session = {
+      taskId: "task-1",
+      modelId: "qwen-audio-3.0-asr-flash-streaming" as const,
+      sendAudio: () => undefined,
+      finish: async () => undefined,
+      close: () => undefined
+    };
+    const service = createAsrService({
+      bootstrapRepository: { getAppSettings: () => ({ userMode: "byok" }) },
+      accountSessionRepository: {
+        get: () => ({ authenticated: false }) as any,
+        getCloudUuid: () => null
+      },
+      memmyConfigWriter: createMemmyConfigWriter({ configPath: fixture.configPath }),
+      cloudClient: {
+        transcribeAudio: async () => { throw new Error("cloud path should not be used"); }
+      },
+      openRealtime: async (options) => {
+        realtimeCalls.push(options);
+        return session;
+      }
+    });
+
+    await expect(service.openRealtime({
+      sampleRate: 16_000,
+      languageHints: ["zh", "en"],
+      onTranscript: () => undefined
+    })).resolves.toBe(session);
+    expect(realtimeCalls).toHaveLength(1);
+    expect(realtimeCalls[0]).toMatchObject({
+      provider: {
+        provider: "dashscope",
+        endpointId: "asr",
+        apiKey: "endpoint-secret"
+      },
+      sampleRate: 16_000,
+      languageHints: ["zh", "en"]
+    });
+    fixture.dispose();
+  });
+
+  it("requires a BYOK ASR assignment for renderer real-time streaming", async () => {
+    const fixture = catalogFixture("account");
+    const service = createAsrService({
+      bootstrapRepository: { getAppSettings: () => ({ userMode: "account" }) },
+      accountSessionRepository: {
+        get: () => ({ authenticated: true, profile: { userId: "owner-a" } }) as any,
+        getCloudUuid: () => "cloud-login-jwt"
+      },
+      memmyConfigWriter: createMemmyConfigWriter({ configPath: fixture.configPath }),
+      cloudClient: {
+        transcribeAudio: async () => { throw new Error("not used"); }
+      }
+    });
+
+    await expect(service.openRealtime({
+      sampleRate: 16_000,
+      onTranscript: () => undefined
+    })).rejects.toMatchObject({ code: "model_selection_unavailable" });
     fixture.dispose();
   });
 

@@ -115,7 +115,8 @@ function supportsOpenAiModelList(protocol: ModelEndpointProtocol): boolean {
   return protocol === "openai-chat-completions"
     || protocol === "openai-responses"
     || protocol === "openai-embeddings"
-    || protocol === "openai-images";
+    || protocol === "openai-images"
+    || protocol === "dashscope-input-audio-chat";
 }
 
 function isOpenAiModelsBody(body: unknown): boolean {

@@ -1,19 +1,40 @@
 /** Asr service module. */
 import {
   AsrTranscriptionResponseSchema,
+  QWEN_ASR_REALTIME_MODEL_ID,
   type ActualModelContext,
   type AppSettingsDto,
+  type AsrRealtimeTranscriptEvent,
   type AsrTranscriptionInput,
   type AsrTranscriptionResponse,
   type ResolvedProviderSnapshot
 } from "@memmy/local-api-contracts";
 import type { CloudClient } from "../adapters/outbound/cloud-client/index.js";
+import {
+  DASHSCOPE_DIARIZED_ASR_MODEL,
+  transcribeDashScopeFile,
+  type DashScopeFileTranscriptionOptions,
+  type DashScopeFileTranscriptionResult
+} from "../adapters/outbound/asr/dashscope-file-transcription.js";
+import {
+  openDashScopeRealtimeSession,
+  type DashScopeRealtimeOptions,
+  type DashScopeRealtimeSession
+} from "../adapters/outbound/asr/dashscope-realtime-transcription.js";
 import type { AccountSessionRepository } from "../infrastructure/app-state-store/repositories/account-session-repo.js";
 import type { BootstrapRepository } from "../infrastructure/app-state-store/repositories/bootstrap-repo.js";
 import type { MemmyConfigWriter } from "../infrastructure/memmy-config/index.js";
 
 export interface AsrService {
   transcribe(input: AsrTranscriptionInput): Promise<AsrTranscriptionResponse>;
+  openRealtime(input: AsrRealtimeOpenInput): Promise<DashScopeRealtimeSession>;
+}
+
+export interface AsrRealtimeOpenInput {
+  sampleRate: 16000;
+  languageHints?: string[];
+  onTranscript: (event: AsrRealtimeTranscriptEvent) => void;
+  onError?: (error: Error) => void;
 }
 
 export interface CreateAsrServiceOptions {
@@ -31,6 +52,16 @@ export interface CreateAsrServiceOptions {
   now?: () => string;
   /** Timeout ms. */
   timeoutMs?: number;
+  /** Speaker-diarized file transcription timeout ms. */
+  diarizedTimeoutMs?: number;
+  /** Speaker-diarized task polling interval ms. */
+  diarizedPollIntervalMs?: number;
+  /** Sleep dependency used by asynchronous task polling. */
+  sleep?: (durationMs: number) => Promise<void>;
+  /** Speaker-diarized file transcription dependency. */
+  transcribeDiarized?: (options: DashScopeFileTranscriptionOptions) => Promise<DashScopeFileTranscriptionResult>;
+  /** Real-time streaming transcription dependency. */
+  openRealtime?: (options: DashScopeRealtimeOptions) => Promise<DashScopeRealtimeSession>;
 }
 
 const DEFAULT_ASR_TIMEOUT_MS = 30_000;
@@ -40,8 +71,34 @@ export function createAsrService(options: CreateAsrServiceOptions): AsrService {
   const fetchImpl = options.fetch ?? globalThis.fetch;
   const timeoutMs = options.timeoutMs ?? DEFAULT_ASR_TIMEOUT_MS;
   const now = options.now ?? (() => new Date().toISOString());
+  const transcribeDiarized = options.transcribeDiarized ?? transcribeDashScopeFile;
+  const openRealtime = options.openRealtime ?? openDashScopeRealtimeSession;
 
   return {
+    async openRealtime(input) {
+      const userMode = options.bootstrapRepository.getAppSettings().userMode;
+      if (userMode !== "account" && userMode !== "byok") {
+        throw Object.assign(new Error("ASR requires account or BYOK mode"), { code: "invalid_argument" as const });
+      }
+      const resolved = await requireAsrSelection(options, userMode);
+      if (resolved.context.source !== "byok" || resolved.context.protocol !== "dashscope-input-audio-chat") {
+        throw modelSelectionUnavailable(resolved.context);
+      }
+      try {
+        return await openRealtime({
+          provider: resolved.provider,
+          sampleRate: input.sampleRate,
+          ...(input.languageHints ? { languageHints: input.languageHints } : {}),
+          onTranscript: input.onTranscript,
+          ...(input.onError ? { onError: input.onError } : {})
+        });
+      } catch (error) {
+        throw withActualModelContext(error, {
+          ...resolved.context,
+          model: QWEN_ASR_REALTIME_MODEL_ID
+        });
+      }
+    },
     async transcribe(input) {
       const userMode = options.bootstrapRepository.getAppSettings().userMode;
       if (userMode !== "account" && userMode !== "byok") {
@@ -53,6 +110,30 @@ export function createAsrService(options: CreateAsrServiceOptions): AsrService {
       }
       if (resolved.context.protocol !== "dashscope-input-audio-chat") {
         throw modelSelectionUnavailable(resolved.context);
+      }
+      if (input.diarizationEnabled === true) {
+        const actualContext = { ...resolved.context, model: DASHSCOPE_DIARIZED_ASR_MODEL };
+        let result: DashScopeFileTranscriptionResult;
+        try {
+          result = await transcribeDiarized({
+            input,
+            provider: resolved.provider,
+            fetch: fetchImpl,
+            ...(options.sleep ? { sleep: options.sleep } : {}),
+            ...(options.diarizedPollIntervalMs === undefined ? {} : { pollIntervalMs: options.diarizedPollIntervalMs }),
+            ...(options.diarizedTimeoutMs === undefined ? {} : { timeoutMs: options.diarizedTimeoutMs })
+          });
+        } catch (error) {
+          throw withActualModelContext(error, actualContext);
+        }
+        return AsrTranscriptionResponseSchema.parse({
+          text: result.text,
+          modelId: DASHSCOPE_DIARIZED_ASR_MODEL,
+          provider: resolved.context.provider,
+          source: resolved.context.source,
+          transcribedAt: now(),
+          segments: result.segments
+        });
       }
       return transcribeWithByok(
         input,
@@ -84,7 +165,10 @@ async function transcribeWithAccount(
       uuid,
       audioBase64: input.audioBase64,
       mimeType: input.mimeType,
-      durationMs: input.durationMs
+      ...(input.durationMs === undefined ? {} : { durationMs: input.durationMs }),
+      ...(input.fileName === undefined ? {} : { fileName: input.fileName }),
+      ...(input.diarizationEnabled === undefined ? {} : { diarizationEnabled: input.diarizationEnabled }),
+      ...(input.speakerCount === undefined ? {} : { speakerCount: input.speakerCount })
     });
   } catch (error) {
     throw withActualModelContext(error, context);
@@ -95,7 +179,8 @@ async function transcribeWithAccount(
     modelId: context.model,
     provider: context.provider,
     source: context.source,
-    transcribedAt: now()
+    transcribedAt: now(),
+    ...(result.segments ? { segments: result.segments } : {})
   });
 }
 

@@ -2,6 +2,7 @@
 import {
   AccountInvitationViewSchema,
   ASR_PROVIDER,
+  AsrTranscriptSegmentSchema,
   AuthorizeIntegrationResponseSchema,
   resolveCloudServiceBaseUrl,
   IntegrationCapabilitiesResponseSchema,
@@ -347,7 +348,10 @@ export function createHttpCloudClient(options: CreateHttpCloudClientOptions = {}
         body: {
           audioBase64: input.audioBase64,
           mimeType: input.mimeType,
-          ...(input.durationMs === undefined ? {} : { durationMs: input.durationMs })
+          ...(input.durationMs === undefined ? {} : { durationMs: input.durationMs }),
+          ...(input.fileName === undefined ? {} : { fileName: input.fileName }),
+          ...(input.diarizationEnabled === undefined ? {} : { diarizationEnabled: input.diarizationEnabled }),
+          ...(input.speakerCount === undefined ? {} : { speakerCount: input.speakerCount })
         },
         lang: "zh",
         bearerCredential: input.uuid
@@ -740,10 +744,14 @@ function toOkResponse(value: unknown): OkResponse {
  */
 function toCloudAsrTranscriptionResult(value: unknown): CloudAsrTranscriptionResult {
   const record = asRecord(value);
+  const parsedSegments = Array.isArray(record.segments)
+    ? record.segments.map((segment) => AsrTranscriptSegmentSchema.safeParse(segment)).filter((result) => result.success).map((result) => result.data)
+    : undefined;
   return {
     text: readString(record.text) ?? "",
     modelId: QWEN_ASR_MODEL_ID,
-    provider: ASR_PROVIDER
+    provider: ASR_PROVIDER,
+    ...(parsedSegments ? { segments: parsedSegments } : {})
   };
 }
 

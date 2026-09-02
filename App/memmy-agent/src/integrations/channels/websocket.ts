@@ -2016,6 +2016,62 @@ export class WebSocketChannel extends BaseChannel {
     }
   }
 
+  handleProjectWorkspaceFiles(request: HttpRequestLike, rawId: string): HttpLikeResponse {
+    if (!this.checkApiToken(request)) return httpError(401, "Unauthorized");
+    if ((request.method ?? "GET").toUpperCase() !== "GET") return httpError(405, "method not allowed");
+    try {
+      const id = decodeApiKey(rawId);
+      if (!id) throw new WebuiProjectError("project_not_found", 404);
+      const project = this.activeProject(id);
+      const rootPath = assertWebuiWorkspaceAvailable(project.rootPath);
+      if (rootPath !== project.rootPath) {
+        throw new WebuiProjectError("project_directory_unavailable", 422);
+      }
+      const [, query] = parseRequestPath(String(request.path ?? ""));
+      return httpJsonResponse(listWorkspaceFiles(rootPath, {
+        rootKind: "project",
+        rootLabel: project.name,
+        relativePath: queryFirst(query, "path") ?? "",
+      }));
+    } catch (error) {
+      if (error instanceof WorkspaceFilesError) {
+        return httpJsonResponse(
+          { code: error.code, message: error.message },
+          { status: error.status },
+        );
+      }
+      if (error instanceof WebuiProjectError) return this.projectErrorResponse(error);
+      return httpJsonResponse(
+        { code: "workspace_files_unavailable", message: "workspace files unavailable" },
+        { status: 500 },
+      );
+    }
+  }
+
+  handleDefaultWorkspaceFiles(request: HttpRequestLike): HttpLikeResponse {
+    if (!this.checkApiToken(request)) return httpError(401, "Unauthorized");
+    if ((request.method ?? "GET").toUpperCase() !== "GET") return httpError(405, "method not allowed");
+    try {
+      const [, query] = parseRequestPath(String(request.path ?? ""));
+      return httpJsonResponse(listWorkspaceFiles(this.workspacePath, {
+        rootKind: "task",
+        rootLabel: path.basename(this.workspacePath) || "workspace",
+        relativePath: queryFirst(query, "path") ?? "",
+      }));
+    } catch (error) {
+      if (error instanceof WorkspaceFilesError) {
+        return httpJsonResponse(
+          { code: error.code, message: error.message },
+          { status: error.status },
+        );
+      }
+      return httpJsonResponse(
+        { code: "workspace_files_unavailable", message: "workspace files unavailable" },
+        { status: 500 },
+      );
+    }
+  }
+
   handleWebuiThreadGet(request: any, key: string): HttpLikeResponse {
     if (!this.checkApiToken(request)) return httpError(401, "Unauthorized");
     const [, query] = parseRequestPath(String(request?.path ?? ""));
@@ -2109,9 +2165,31 @@ export class WebSocketChannel extends BaseChannel {
     if (!this.checkApiToken(request)) return httpError(401, "Unauthorized");
     if ((request.method ?? "GET").toUpperCase() !== "POST") return httpError(405, "method not allowed");
     const artifactRequest = artifactRequestFromRequest(request);
-    if (!artifactRequest) return httpError(400, "missing path or sessionKey");
-    const workspace = this.artifactSessionWorkspace(artifactRequest.sessionKey);
+    if (!artifactRequest) return httpError(400, "missing path or workspace scope");
+    let workspace: string | null;
+    try {
+      if (artifactRequest.scope.kind === "session") {
+        workspace = this.artifactSessionWorkspace(artifactRequest.scope.key);
+      } else if (artifactRequest.scope.kind === "project") {
+        const id = decodeApiKey(artifactRequest.scope.key);
+        if (!id) throw new WebuiProjectError("project_not_found", 404);
+        const project = this.activeProject(id);
+        workspace = assertWebuiWorkspaceAvailable(project.rootPath);
+        if (workspace !== project.rootPath) {
+          throw new WebuiProjectError("project_directory_unavailable", 422);
+        }
+      } else {
+        workspace = assertWebuiWorkspaceAvailable(this.workspacePath);
+      }
+    } catch (error) {
+      if (error instanceof WebuiProjectError) return this.projectErrorResponse(error);
+      return httpError(404, "workspace not found");
+    }
     if (!workspace) return httpError(404, "session not found");
+    if (
+      artifactRequest.scope.kind === "project"
+      && (path.isAbsolute(expandHomePath(artifactRequest.path)) || artifactRequest.path.startsWith("~/"))
+    ) return httpError(404, "artifact not found");
     const resolved = this.resolveOrStageArtifactPath(artifactRequest.path, workspace);
     if (!resolved) return httpError(404, "artifact not found");
     return httpJsonResponse({
@@ -2127,8 +2205,8 @@ export class WebSocketChannel extends BaseChannel {
     if (!this.checkApiToken(request)) return httpError(401, "Unauthorized");
     if ((request.method ?? "GET").toUpperCase() !== "POST") return httpError(405, "method not allowed");
     const artifactRequest = artifactRequestFromRequest(request);
-    if (!artifactRequest) return httpError(400, "missing path or sessionKey");
-    const workspace = this.artifactSessionWorkspace(artifactRequest.sessionKey);
+    if (!artifactRequest || artifactRequest.scope.kind !== "session") return httpError(400, "missing path or sessionKey");
+    const workspace = this.artifactSessionWorkspace(artifactRequest.scope.key);
     if (!workspace) return httpError(404, "session not found");
     const resolved = this.resolveOrStageArtifactPath(artifactRequest.path, workspace);
     if (!resolved) return httpError(404, "artifact not found");
@@ -2144,8 +2222,8 @@ export class WebSocketChannel extends BaseChannel {
     if (!this.checkApiToken(request)) return httpError(401, "Unauthorized");
     if ((request.method ?? "GET").toUpperCase() !== "POST") return httpError(405, "method not allowed");
     const artifactRequest = artifactRequestFromRequest(request);
-    if (!artifactRequest) return httpError(400, "missing path or sessionKey");
-    const workspace = this.artifactSessionWorkspace(artifactRequest.sessionKey);
+    if (!artifactRequest || artifactRequest.scope.kind !== "session") return httpError(400, "missing path or sessionKey");
+    const workspace = this.artifactSessionWorkspace(artifactRequest.scope.key);
     if (!workspace) return httpError(404, "session not found");
     const resolved = this.resolveOrStageArtifactPath(artifactRequest.path, workspace);
     if (!resolved) return httpError(404, "artifact not found");
@@ -2796,6 +2874,7 @@ export class WebSocketChannel extends BaseChannel {
     if (got === "/api/webui/artifacts/reveal") return this.handleArtifactReveal(request);
     if (got === "/api/webui/artifacts/open") return this.handleArtifactOpen(request);
     if (got === "/api/webui/media/upload") return this.handleWebuiMediaUpload(request);
+    if (got === "/api/workspace/files") return this.handleDefaultWorkspaceFiles(request);
     if (got === "/api/settings/update") return this.handleSettingsUpdate(request);
     if (got === "/api/settings/model-configurations/create") return this.handleSettingsModelConfigurationCreate(request);
     if (got === "/api/settings/provider/update") return this.handleSettingsProviderUpdate(request);
@@ -2827,6 +2906,8 @@ export class WebSocketChannel extends BaseChannel {
     if (match) return this.handleProjectWorkspaceEnvironment(request, match[1], "diff");
     match = got.match(/^\/api\/projects\/([^/]+)\/environment\/branch$/);
     if (match) return this.handleProjectWorkspaceEnvironment(request, match[1], "branch");
+    match = got.match(/^\/api\/projects\/([^/]+)\/workspace\/files$/);
+    if (match) return this.handleProjectWorkspaceFiles(request, match[1]);
     match = got.match(/^\/api\/projects\/([^/]+)\/reveal$/);
     if (match) return this.handleProjectReveal(request, match[1]);
     match = got.match(/^\/api\/projects\/([^/]+)$/);
@@ -4747,7 +4828,7 @@ function requestBodyText(request: HttpRequestLike): string {
 
 function artifactRequestFromRequest(
   request: HttpRequestLike,
-): { path: string; sessionKey: string } | null {
+): { path: string; scope: { kind: "session" | "project"; key: string } | { kind: "workspace" } } | null {
   const body = requestBodyText(request).trim();
   if (!body) return null;
   let parsed: unknown;
@@ -4760,15 +4841,19 @@ function artifactRequestFromRequest(
   const raw = parsed as Record<string, unknown>;
   const rawPath = raw.path;
   const sessionKey = raw.sessionKey;
-  if (
-    typeof rawPath !== "string"
-    || !rawPath.trim()
-    || typeof sessionKey !== "string"
-    || decodeGuiSessionApiKey(sessionKey) == null
-  ) {
-    return null;
+  const projectId = raw.projectId;
+  const workspace = raw.workspace;
+  if (typeof rawPath !== "string" || !rawPath.trim()) return null;
+  if (typeof sessionKey === "string" && decodeGuiSessionApiKey(sessionKey) != null) {
+    return { path: rawPath.trim(), scope: { kind: "session", key: sessionKey } };
   }
-  return { path: rawPath.trim(), sessionKey };
+  if (typeof projectId === "string" && projectId.trim()) {
+    return { path: rawPath.trim(), scope: { kind: "project", key: projectId } };
+  }
+  if (workspace === true) {
+    return { path: rawPath.trim(), scope: { kind: "workspace" } };
+  }
+  return null;
 }
 
 function expandHomePath(value: string): string {

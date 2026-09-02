@@ -83,6 +83,35 @@ describe("WorkspacePreviewPane", () => {
     expect(container.querySelector(".litrev-file-tab--active")?.textContent).toContain("访谈转写.txt");
   });
 
+  it("shows a draft project root without opening a file and filters visible entries", async () => {
+    await act(async () => {
+      root.render(
+        <I18nProvider language="zh-CN">
+          <WorkspacePreviewPane
+            sessionKey="draft:project-a"
+            rootLabel="memmy-agent"
+            loadDirectory={loadDirectory}
+            loadPreview={loadPreview}
+            autoSelectInitialFile={false}
+          />
+        </I18nProvider>
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.querySelectorAll('[role="tab"]')).toHaveLength(0);
+    expect(container.querySelector(".litrev-file-folder__toggle")?.getAttribute("aria-expanded")).toBe("false");
+    expect(container.querySelector(".litrev-preview-empty")?.textContent).toContain("选择文件以查看预览");
+    const filter = container.querySelector<HTMLInputElement>('[aria-label="筛选文件…"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(filter, "reports");
+      filter.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(container.querySelector(".litrev-file-list")?.textContent).toContain("reports");
+    expect(container.querySelector(".litrev-file-list")?.textContent).not.toContain("访谈转写.txt");
+  });
+
   it("loads folders lazily and opens files in tabs", async () => {
     const folder = container.querySelector<HTMLButtonElement>(".litrev-file-folder__toggle")!;
     await act(async () => {
@@ -197,5 +226,99 @@ describe("WorkspacePreviewPane", () => {
     expect(folderOnlyLoader).toHaveBeenCalledWith("websocket:folders-only", "reports");
     expect(container.querySelector(".litrev-file-folder__toggle")?.getAttribute("aria-expanded")).toBe("true");
     expect(container.querySelector(".litrev-file-tab--active")?.textContent).toContain("初步诊断.md");
+  });
+
+  it("opens an artifact requested by a result card", async () => {
+    await act(async () => {
+      root.render(
+        <I18nProvider language="zh-CN">
+          <WorkspacePreviewPane
+            sessionKey="websocket:legal"
+            rootLabel="法律项目"
+            loadDirectory={loadDirectory}
+            loadPreview={loadPreview}
+            openRequest={{ path: "reports/诊断报告.md", requestId: 1 }}
+          />
+        </I18nProvider>
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.querySelectorAll('[role="tab"]')).toHaveLength(2);
+    expect(container.querySelector(".litrev-file-tab--active")?.textContent).toContain("诊断报告.md");
+    expect(loadPreview).toHaveBeenLastCalledWith("reports/诊断报告.md");
+  });
+
+  it("restores the original empty preview and supports a custom recording view", async () => {
+    const emptyLoader = vi.fn(async (_sessionKey: string, path: string): Promise<WorkspaceFilesListing> => ({
+      root: { kind: "task", label: "法律任务" },
+      path,
+      truncated: false,
+      entries: []
+    }));
+    await act(async () => {
+      root.render(
+        <I18nProvider language="zh-CN">
+          <WorkspacePreviewPane
+            sessionKey="websocket:legal-empty"
+            rootLabel="法律项目"
+            loadDirectory={emptyLoader}
+            loadPreview={loadPreview}
+            emptyLabel="暂无可预览文件"
+          />
+        </I18nProvider>
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.querySelector(".workspace-view-launcher")).toBeNull();
+    expect(container.querySelector(".litrev-file-list")).toBeNull();
+    expect(container.querySelector(".litrev-preview-empty")?.textContent).toContain("暂无可预览文件");
+
+    await act(async () => {
+      root.render(
+        <I18nProvider language="zh-CN">
+          <WorkspacePreviewPane
+            sessionKey="websocket:legal-empty"
+            rootLabel="法律项目"
+            loadDirectory={emptyLoader}
+            loadPreview={loadPreview}
+            openRequest={{ path: "views/访谈录音", requestId: 1 }}
+            renderPreview={(path) => path === "views/访谈录音" ? <div>录音列表</div> : undefined}
+          />
+        </I18nProvider>
+      );
+      await Promise.resolve();
+    });
+    expect(container.querySelector(".litrev-file-tab--active")?.textContent).toContain("访谈录音");
+    expect(container.textContent).toContain("录音列表");
+  });
+
+  it("collapses the file tree for a recording-focused open request and lets the user restore it", async () => {
+    await act(async () => {
+      root.render(
+        <I18nProvider language="zh-CN">
+          <WorkspacePreviewPane
+            sessionKey="websocket:recording-focus"
+            rootLabel="法律项目"
+            loadDirectory={loadDirectory}
+            loadPreview={loadPreview}
+            openRequest={{ path: "views/访谈录音", requestId: 1, fileTreeOpen: false }}
+            renderPreview={(path) => path === "views/访谈录音" ? <div>实时转写</div> : undefined}
+          />
+        </I18nProvider>
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.querySelector(".litrev-file-list")).toBeNull();
+    expect(container.querySelector(".litrev-file-browser__toggle")?.getAttribute("aria-expanded")).toBe("false");
+    expect(container.textContent).toContain("实时转写");
+
+    await act(async () => container.querySelector<HTMLButtonElement>(".litrev-file-browser__toggle")!.click());
+    expect(container.querySelector(".litrev-file-list")).not.toBeNull();
   });
 });

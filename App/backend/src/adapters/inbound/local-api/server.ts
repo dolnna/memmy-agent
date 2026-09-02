@@ -126,7 +126,9 @@ export function createLocalApiServer(options: CreateLocalApiServerOptions): Fast
   });
   registerAsrRoutes(app, {
     asr: options.services.asr,
-    authenticateRuntimeToken
+    authenticateRuntimeToken,
+    verifyRuntimeToken: (token) => options.permissionManager.verifyRuntimeToken(token),
+    isOriginAllowed: (origin) => !origin || isAllowedOrigin(origin, options.allowedOrigins)
   });
   registerOnboardingInsightRoutes(app, {
     onboardingInsight: options.services.onboardingInsight,
