@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   LEGAL_DIAG_REPORT_PATH,
   LEGAL_DIAG_TRANSCRIPT_PATH,
-  LEGAL_DIAG_WORKSHEET_PATH,
   buildLegalDiagWorkspaceListing,
   legalMaterialWorkspacePath,
   loadLegalDiagWorkspacePreview,
@@ -42,7 +41,6 @@ describe("labor diagnostic task workspace", () => {
       "recordings",
       "materials",
       "transcripts",
-      "diagnostics",
       "reports"
     ]);
     expect(buildLegalDiagWorkspaceListing("reports", workspace()).entries).toEqual([]);
@@ -65,7 +63,6 @@ describe("labor diagnostic task workspace", () => {
     expect(merged.entries.map((entry) => entry.name)).toEqual([
       ".git",
       "App",
-      "diagnostics",
       "materials",
       "recordings",
       "reports",
@@ -117,9 +114,12 @@ describe("labor diagnostic task workspace", () => {
     expect(preview?.sections[1]?.body).toBe("员工手册正文");
   });
 
-  it("adds diagnosis and report outputs only after generation", () => {
+  it("adds only the Word report after generation and does not produce a diagnostic workbook", async () => {
     const state = workspace({ outputsReady: true });
-    expect(buildLegalDiagWorkspaceListing("diagnostics", state).entries[0]?.path).toBe(LEGAL_DIAG_WORKSHEET_PATH);
+    expect(buildLegalDiagWorkspaceListing("diagnostics", state).entries).toEqual([]);
+    expect(await loadLegalDiagWorkspacePreview("diagnostics/用工合规及风险诊断表.xlsx", state)).toBeNull();
+    expect(buildLegalDiagWorkspaceListing("reports", state).entries).toHaveLength(1);
     expect(buildLegalDiagWorkspaceListing("reports", state).entries[0]?.path).toBe(LEGAL_DIAG_REPORT_PATH);
+    expect(LEGAL_DIAG_REPORT_PATH).toBe("reports/用工风险诊断报告.docx");
   });
 });

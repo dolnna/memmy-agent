@@ -2299,13 +2299,7 @@ export function HomePage() {
 
   function prepareLegalDiagnosis() {
     const prompt = `${LEGAL_DIAGNOSIS_COMMAND}  ${t("home.capability.legalDiagnosisPrompt")}`;
-    setCurrentComposerDraft(prompt);
-    setSlashMenuDismissed(true);
-    setSlashPickerOpen(false);
-    window.requestAnimationFrame(() => {
-      inputRef.current?.focus();
-      inputRef.current?.setSelectionRange(prompt.length, prompt.length);
-    });
+    launchLegalDiagnosis(prompt);
   }
 
   function prepareLegalSystemDesign() {

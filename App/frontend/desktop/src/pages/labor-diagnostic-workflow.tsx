@@ -1,8 +1,8 @@
-/** Conversation + two-card positive path for the labor diagnostic PoC. */
+/** On-demand collection cards, independent from diagnostic report progress. */
 
-import { useEffect, useRef, useState, type ChangeEvent, type DragEvent, type MutableRefObject, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type DragEvent, type MutableRefObject, type ReactNode } from "react";
 import type { AsrTranscriptionResponse } from "@memmy/local-api-contracts";
-import { Check, ChevronDown, ChevronRight, CircleDashed, Folder, Mic, Minus, Pause, Pencil, Play, Plus, Send, Square, SquareSlash, Upload, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, CircleDashed, FileDown, Folder, Mic, Minus, Pause, Pencil, Play, Plus, Send, Square, SquareSlash, X } from "lucide-react";
 import { Button } from "../components/button.js";
 import { FileTypeIcon } from "../components/file-type-icon.js";
 import { useTranslation } from "../i18n/use-translation.js";
@@ -23,6 +23,9 @@ import {
 } from "./labor-recording-preview-pane.js";
 import {
   LEGAL_DIAG_RECORDING_PATH,
+  LEGAL_DIAG_TRANSCRIPT_PATH,
+  LEGAL_DIAG_REPORT_PATH,
+  legalMaterialWorkspacePath,
   type LegalDiagSourceItem
 } from "./labor-diagnostic-workspace.js";
 import {
@@ -30,8 +33,11 @@ import {
   LEGAL_DIAGNOSIS_COMMAND,
   formatSourceSize,
   isLegalDiagSourceName,
+  legalDiagConversationAction,
+  type LegalDiagCard,
   type LegalDiagPhase
 } from "./labor-diagnostic-model.js";
+import { LegalDiagnosticTemplates } from "./labor-diagnostic-templates.js";
 import {
   LEGAL_DIAG_ASSISTANT_INTRO,
   LEGAL_DIAG_EXECUTION_INTRO,
@@ -41,24 +47,24 @@ import {
   LEGAL_DIAG_RESULT_LINE,
   LEGAL_DIAG_THINKING_STAGES,
   LEGAL_DIAG_TODO_ITEMS,
-  LEGAL_DIAG_TODO_OUTPUTS
+  LEGAL_DIAG_TODO_OUTPUTS,
+  LEGAL_DIAG_VERIFICATION_TODO_INDEX
 } from "./labor-diagnostic-demo-data.js";
 
 export const LEGAL_DIAG_THINKING_INTERVAL_MS = 420;
 export const LEGAL_DIAG_TODO_INTERVAL_MS = 520;
-export const LEGAL_DIAG_MISSING_INFO_TODO_INDEX = 3;
 export const LEGAL_DIAG_PREPARING_INTERVAL_MS = 560;
 
 type LegalDiagAckPlacement = "setup" | "beforeResult" | "afterResult";
 
 export interface LegalRecordingController {
+  open(): void;
   start(): Promise<void>;
   pause(): void;
   resume(): void;
   finish(): Promise<void>;
   upload(file: File): Promise<void>;
   addConversationFile(file: File): void;
-  skip(): void;
 }
 
 export interface LaborDiagnosticWorkflowProps {
@@ -73,6 +79,7 @@ export interface LaborDiagnosticWorkflowProps {
   transcribeRecordingFile: (file: File) => Promise<AsrTranscriptionResponse>;
   onTranscriptReady: (transcript: string) => void;
   onRecordingPreviewChange?: (state: LegalRecordingPreviewState) => void;
+  onOpenRecording?: () => void;
   recordingControllerRef?: MutableRefObject<LegalRecordingController | null>;
   onSourcesChange?: (items: LegalDiagSourceItem[]) => void;
   onOpenArtifact?: (path: string) => void;
@@ -85,23 +92,29 @@ export function LaborDiagnosticWorkflow(props: LaborDiagnosticWorkflowProps) {
   const { t } = useTranslation();
   const sourceFileInputRef = useRef<HTMLInputElement | null>(null);
   const sourceFolderInputRef = useRef<HTMLInputElement | null>(null);
-  const recordingFileInputRef = useRef<HTMLInputElement | null>(null);
+  const addPickedSourcesToComposerRef = useRef(true);
+  const transcriptSequenceRef = useRef(0);
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const conversationScrollRef = useRef<HTMLDivElement | null>(null);
+  const activeCardContainerRef = useRef<HTMLDivElement | null>(null);
   const composerAttachMenuRef = useRef<HTMLDetailsElement | null>(null);
-  const addPickedSourcesToComposerRef = useRef(false);
   const onPhaseChangeRef = useRef(props.onPhaseChange);
   onPhaseChangeRef.current = props.onPhaseChange;
   const [sourceItems, setSourceItems] = useState<LegalDiagSourceItem[]>([]);
+  const [activeCard, setActiveCard] = useState<LegalDiagCard | null>("templates");
+  const flowCardVisible = activeCard === "materials" || activeCard === "questions";
+  const [notice, setNotice] = useState("");
+  const [missingInfoAvailable, setMissingInfoAvailable] = useState(false);
+  const recordingBusy = props.recorder.isRecording || props.recorder.isStarting || props.recorder.isTranscribing;
   const [composerContextIds, setComposerContextIds] = useState<string[]>([]);
   const [unsupportedCount, setUnsupportedCount] = useState(0);
   const [todoProgress, setTodoProgress] = useState(0);
-  const [acks, setAcks] = useState<Array<{ id: number; text: string; placement: LegalDiagAckPlacement; reply?: string }>>([]);
+  const [acks, setAcks] = useState<Array<{ id: number; text: string; placement: LegalDiagAckPlacement; reply?: string; files: LegalDiagSourceItem[] }>>([]);
   const ackSequenceRef = useRef(0);
   const [todoDetailsOpen, setTodoDetailsOpen] = useState(true);
   const [intakeDetailsOpen, setIntakeDetailsOpen] = useState(true);
   const [processDetailsOpen, setProcessDetailsOpen] = useState(false);
   const [transcript, setTranscript] = useState("");
-  const [recordingSkipped, setRecordingSkipped] = useState(false);
   const [recordSeconds, setRecordSeconds] = useState(0);
   const [recordingError, setRecordingError] = useState("");
   const [composerVoiceError, setComposerVoiceError] = useState("");
@@ -114,6 +127,26 @@ export function LaborDiagnosticWorkflow(props: LaborDiagnosticWorkflowProps) {
   const [missingInfoSupplements, setMissingInfoSupplements] = useState<Record<string, string>>({});
   const [missingInfoCardStatus, setMissingInfoCardStatus] = useState<"open" | "submitted" | "dismissed">("open");
   const [missingInfoSummaryOpen, setMissingInfoSummaryOpen] = useState(false);
+  const awaitingVerification = props.phase.kind === "task"
+    && todoProgress === LEGAL_DIAG_VERIFICATION_TODO_INDEX
+    && LEGAL_DIAG_MISSING_INFO_QUESTIONS.length > 0
+    && missingInfoCardStatus === "open";
+
+  useLayoutEffect(() => {
+    const container = activeCardContainerRef.current;
+    if (!container) return;
+    container.scrollTop = 0;
+    const questions = container.querySelector<HTMLElement>(".litrev-question-list");
+    if (questions) questions.scrollTop = 0;
+  }, [activeCard]);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      const scroll = conversationScrollRef.current;
+      if (scroll) scroll.scrollTop = scroll.scrollHeight;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [acks.length, activeCard, props.phase.kind, missingInfoAvailable]);
 
   useEffect(() => {
     props.onSourcesChange?.(sourceItems);
@@ -126,7 +159,7 @@ export function LaborDiagnosticWorkflow(props: LaborDiagnosticWorkflowProps) {
   useEffect(() => {
     if (props.phase.kind !== "preparing") return;
     const timer = window.setTimeout(() => {
-      onPhaseChangeRef.current({ kind: "recording" });
+      onPhaseChangeRef.current({ kind: "collecting" });
     }, LEGAL_DIAG_PREPARING_INTERVAL_MS);
     return () => window.clearTimeout(timer);
   }, [props.phase.kind]);
@@ -151,7 +184,14 @@ export function LaborDiagnosticWorkflow(props: LaborDiagnosticWorkflowProps) {
 
   useEffect(() => {
     if (props.phase.kind !== "task") return;
-    if (todoProgress === LEGAL_DIAG_MISSING_INFO_TODO_INDEX && missingInfoCardStatus === "open") return;
+    if (awaitingVerification) {
+      // The demo questions belong to this TODO; later work waits for the user.
+      if (!missingInfoAvailable) {
+        setMissingInfoAvailable(true);
+        setActiveCard("questions");
+      }
+      return;
+    }
     if (todoProgress >= LEGAL_DIAG_TODO_ITEMS.length) {
       setTodoDetailsOpen(false);
       onPhaseChangeRef.current({ kind: "review" });
@@ -159,7 +199,7 @@ export function LaborDiagnosticWorkflow(props: LaborDiagnosticWorkflowProps) {
     }
     const timer = window.setTimeout(() => setTodoProgress((value) => value + 1), LEGAL_DIAG_TODO_INTERVAL_MS);
     return () => window.clearTimeout(timer);
-  }, [missingInfoCardStatus, props.phase.kind, todoProgress]);
+  }, [props.phase.kind, todoProgress, awaitingVerification, missingInfoAvailable]);
 
   useEffect(() => {
     if (props.recorder.status !== "recording") return;
@@ -188,9 +228,13 @@ export function LaborDiagnosticWorkflow(props: LaborDiagnosticWorkflowProps) {
   }, [props.onRecordingPreviewChange, props.recorder.status, recordSeconds]);
 
   async function startRecording() {
+    openCard("recording");
+    if (recordingBusy || uploadingRecording) {
+      props.onOpenRecording?.();
+      return;
+    }
     setRecordingError("");
     setRecordSeconds(0);
-    setRecordingSkipped(false);
     props.onRecordingPreviewChange?.({ mode: "starting", elapsedSeconds: 0, transcript: "", transcriptSource: null });
     try {
       await props.recorder.start();
@@ -217,17 +261,11 @@ export function LaborDiagnosticWorkflow(props: LaborDiagnosticWorkflowProps) {
     }
   }
 
-  async function handleRecordingFilePicked(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) return;
-    await uploadRecordingFile(file);
-  }
-
   async function uploadRecordingFile(file: File) {
+    openCard("recording");
+    if (recordingBusy || uploadingRecording) return;
     setRecordingError("");
     setUploadingRecording(true);
-    setRecordingSkipped(false);
     setRecordSeconds(0);
     props.onRecordingPreviewChange?.({ mode: "transcribing", elapsedSeconds: 0, transcript: "", transcriptSource: null });
     try {
@@ -260,7 +298,15 @@ export function LaborDiagnosticWorkflow(props: LaborDiagnosticWorkflowProps) {
       transcriptSource: "asr",
       ...(segments.length ? { segments } : {})
     });
-    props.onPhaseChange({ kind: "materials" });
+    let transcriptName: string;
+    do {
+      transcriptSequenceRef.current += 1;
+      transcriptName = transcriptSequenceRef.current === 1
+        ? "访谈转写.txt"
+        : `访谈转写-${transcriptSequenceRef.current}.txt`;
+    } while (sourceItems.some((item) => item.label === transcriptName));
+    addSourceFiles([new File([`${text}\n`], transcriptName, { type: "text/plain" })], false);
+    openCard("materials");
   }
 
   function handleTranscriptionFailure(error: unknown) {
@@ -274,35 +320,69 @@ export function LaborDiagnosticWorkflow(props: LaborDiagnosticWorkflowProps) {
     });
   }
 
-  function skipRecording() {
-    if (props.recorder.isRecording) props.recorder.cancel();
-    setRecordingSkipped(true);
-    setRecordingError("");
-    props.onRecordingPreviewChange?.({ mode: "idle", elapsedSeconds: 0, transcript: "", transcriptSource: null });
-    props.onPhaseChange({ kind: "materials" });
-  }
-
-  function confirmMaterials() {
+  function startReport(captureComposer = true) {
+    if (props.phase.kind === "thinking" || props.phase.kind === "task") return;
+    if (recordingBusy || uploadingRecording) {
+      openCard("recording");
+      setNotice(t("legalDiagnosis.sources.finishRecordingFirst"));
+      return;
+    }
+    const hasSupplement = acks.some((entry) => entry.text && !entry.text.startsWith("/") && !legalDiagConversationAction(entry.text));
+    if (!sourceItems.length && !transcript && !hasSupplement) {
+      openCard("materials");
+      setNotice(t("legalDiagnosis.sources.needInput"));
+      return;
+    }
+    if (captureComposer) {
+      const files = sourceItems.filter((item) => composerContextIds.includes(item.id));
+      const draft = props.composerDraft.trim();
+      if (files.length || draft) {
+        appendAck(draft, props.phase.kind === "review" ? "afterResult" : "setup", undefined, files);
+        setComposerContextIds([]);
+        props.onComposerDraftChange("");
+        if (draft) props.onComposerSubmit(draft);
+      }
+    }
     setTodoProgress(0);
+    setMissingInfoAvailable(false);
+    setMissingInfoCardStatus("open");
+    setMissingInfoAnswers({});
+    setMissingInfoSupplements({});
+    setActiveCard(null);
+    setNotice("");
     props.onPhaseChange({ kind: "thinking", stage: 0 });
   }
 
-  function skipCurrentCard() {
-    if (props.phase.kind === "recording") skipRecording();
-    else if (props.phase.kind === "materials") confirmMaterials();
+  function openCard(card: LegalDiagCard) {
+    if (card === "questions" && !missingInfoAvailable) {
+      setNotice(t("legalDiagnosis.missingInfo.none"));
+      return;
+    }
+    // Keep the current flow card in front, including when the preview opens recording.
+    if (flowCardVisible && (card === "templates" || card === "recording")) return;
+    composerAttachMenuRef.current?.removeAttribute("open");
+    setActiveCard(card);
+    setNotice("");
+  }
+
+  function dismissCard() {
+    composerAttachMenuRef.current?.removeAttribute("open");
+    setActiveCard(null);
+    setNotice("");
   }
 
   function handleSourceFilesPicked(event: ChangeEvent<HTMLInputElement>) {
     const files = [...(event.target.files ?? [])];
     event.target.value = "";
     const addToComposer = addPickedSourcesToComposerRef.current;
-    addPickedSourcesToComposerRef.current = false;
+    addPickedSourcesToComposerRef.current = true;
     addSourceFiles(files, addToComposer);
   }
 
-  function addSourceFiles(files: File[], addToComposer = false) {
+  function addSourceFiles(files: File[], addToComposer = true) {
     const accepted = files.filter((file) => isLegalDiagSourceName(file.name));
     setUnsupportedCount(files.length - accepted.length);
+    setNotice(accepted.length && addToComposer ? t("legalDiagnosis.sources.added", { count: accepted.length }) : "");
     const acceptedIds = accepted.map((file) => {
       const relativePath = file.webkitRelativePath || file.name;
       return `${relativePath}:${file.size}:${file.lastModified}`;
@@ -332,7 +412,9 @@ export function LaborDiagnosticWorkflow(props: LaborDiagnosticWorkflowProps) {
   }
 
   function removeSourceItem(id: string) {
-    setSourceItems((current) => current.filter((item) => item.id !== id));
+    if (!acks.some((entry) => entry.files.some((file) => file.id === id))) {
+      setSourceItems((current) => current.filter((item) => item.id !== id));
+    }
     setComposerContextIds((current) => current.filter((contextId) => contextId !== id));
   }
 
@@ -351,29 +433,45 @@ export function LaborDiagnosticWorkflow(props: LaborDiagnosticWorkflowProps) {
         });
     if (!files.length) return;
     event.preventDefault();
-    addSourceFiles(files, true);
+    addSourceFiles(files);
     composerInputRef.current?.focus();
   }
 
   function submitComposer() {
     const text = props.composerDraft.trim();
-    if (!text) return;
-    if (props.phase.kind === "recording" || props.phase.kind === "materials") skipCurrentCard();
+    const files = sourceItems.filter((item) => composerContextIds.includes(item.id));
+    if (!text && !files.length) return;
+    const action = legalDiagConversationAction(text);
     const placement: LegalDiagAckPlacement = props.phase.kind === "review"
       ? "afterResult"
-      : props.phase.kind === "task"
+      : props.phase.kind === "task" || props.phase.kind === "thinking"
         ? "beforeResult"
         : "setup";
-    appendAck(text, placement);
+    if (action === "dismiss") {
+      if (awaitingVerification) dismissMissingInfo();
+      else dismissCard();
+    }
+    else if (action === "generate") startReport(false);
+    else if (action) openCard(action);
+    else if (!awaitingVerification) dismissCard();
+    const reply = action === "templates" ? t("legalDiagnosis.shortcuts.templatesReply")
+      : action === "recording" ? t("legalDiagnosis.shortcuts.recordingReply")
+      : action === "materials" ? t("legalDiagnosis.shortcuts.materialsReply")
+      : action === "dismiss" ? t("legalDiagnosis.shortcuts.dismissReply")
+      : action === "generate" ? t("legalDiagnosis.shortcuts.generateReply")
+      : undefined;
+    appendAck(text, placement, reply ?? (files.length ? t("legalDiagnosis.composer.filesReceived") : undefined), files);
+    setComposerContextIds([]);
     props.onComposerSubmit(text);
     props.onComposerDraftChange("");
   }
 
-  function appendAck(text: string, placement: LegalDiagAckPlacement, reply?: string) {
+  function appendAck(text: string, placement: LegalDiagAckPlacement, reply?: string, files: LegalDiagSourceItem[] = []) {
     ackSequenceRef.current += 1;
     setAcks((current) => [...current, {
       id: ackSequenceRef.current,
       text,
+      files,
       placement,
       ...(reply ? { reply } : {})
     }]);
@@ -385,24 +483,28 @@ export function LaborDiagnosticWorkflow(props: LaborDiagnosticWorkflowProps) {
     ));
     if (!answered.length) return;
     setMissingInfoCardStatus("submitted");
+    setActiveCard(null);
+    setMissingInfoSummaryOpen(true);
+    setNotice("");
   }
 
   function dismissMissingInfo() {
     setMissingInfoCardStatus("dismissed");
+    setActiveCard(null);
   }
 
   if (props.recordingControllerRef) {
     props.recordingControllerRef.current = {
+      open: () => openCard("recording"),
       start: startRecording,
       pause: () => props.recorder.pause(),
       resume: () => props.recorder.resume(),
       finish: finishRecording,
       upload: uploadRecordingFile,
       addConversationFile: (file) => {
-        addSourceFiles([file], true);
+        addSourceFiles([file]);
         window.requestAnimationFrame(() => composerInputRef.current?.focus());
-      },
-      skip: skipRecording
+      }
     };
   }
 
@@ -412,7 +514,7 @@ export function LaborDiagnosticWorkflow(props: LaborDiagnosticWorkflowProps) {
 
   return (
     <>
-      <div className="litrev-scroll">
+      <div className="litrev-scroll" ref={conversationScrollRef}>
         <div className="litrev-conversation" data-testid="legal-diag-workflow">
           <div className="litrev-user-message">
             <div className="agent-chat-bubble agent-chat-bubble--user litrev-user-bubble">
@@ -431,7 +533,7 @@ export function LaborDiagnosticWorkflow(props: LaborDiagnosticWorkflowProps) {
           ) : <p className="litrev-assistant-copy">{LEGAL_DIAG_ASSISTANT_INTRO}</p>}
           {acks.filter((entry) => entry.placement === "setup").map(renderAck)}
 
-          {props.phase.kind !== "recording" ? renderRecordingSummary() : null}
+          {renderRecordingSummary()}
           {props.phase.kind === "thinking" || props.phase.kind === "task" || props.phase.kind === "review"
             ? renderMaterialsSummary()
             : null}
@@ -442,26 +544,43 @@ export function LaborDiagnosticWorkflow(props: LaborDiagnosticWorkflowProps) {
             ? renderIntakeActivity(props.phase.kind !== "thinking")
             : null}
           {props.phase.kind === "task" || props.phase.kind === "review" ? renderTaskProcess() : null}
-          {props.phase.kind === "task" || props.phase.kind === "review"
+          {missingInfoAvailable && missingInfoCardStatus === "open" ? (
+            <div className="legal-followup-note">
+              <p className="litrev-assistant-copy">{LEGAL_DIAG_MISSING_INFO_INTRO}</p>
+              {activeCard !== "questions" ? <button type="button" onClick={() => openCard("questions")}>{t("legalDiagnosis.missingInfo.open")}</button> : null}
+            </div>
+          ) : null}
+          {props.phase.kind === "task" || props.phase.kind === "thinking" || props.phase.kind === "review"
             ? renderMissingInfoSummary()
             : null}
-          {props.phase.kind === "task" || props.phase.kind === "review"
+          {props.phase.kind === "thinking" || props.phase.kind === "task" || props.phase.kind === "review"
             ? acks.filter((entry) => entry.placement === "beforeResult").map(renderAck)
             : null}
           {props.phase.kind === "review" ? renderResult() : null}
-          {props.phase.kind === "review"
+          {props.phase.kind === "thinking" || props.phase.kind === "task" || props.phase.kind === "review"
             ? acks.filter((entry) => entry.placement === "afterResult").map(renderAck)
             : null}
         </div>
       </div>
-      <div className="litrev-dock">
-        {props.phase.kind === "recording" ? renderRecordingCard() : null}
-        {props.phase.kind === "materials" ? renderMaterialsCard() : null}
-        {props.phase.kind === "task"
-          && todoProgress === LEGAL_DIAG_MISSING_INFO_TODO_INDEX
-          && missingInfoCardStatus === "open"
-          ? renderMissingInfoCard()
-          : null}
+      <div className="litrev-dock legal-workflow-dock">
+        <div id="legal-active-card" ref={activeCardContainerRef} className={`legal-active-card${activeCard === "questions" ? " legal-active-card--questions" : ""}`}>
+          {activeCard === "templates" ? <LegalDiagnosticTemplates onRecord={() => openCard("recording")} onUpload={() => openCard("materials")} onDismiss={dismissCard} /> : null}
+          {activeCard === "recording" ? renderRecordingCard() : null}
+          {activeCard === "materials" ? renderMaterialsCard() : null}
+          {activeCard === "questions" && missingInfoAvailable ? renderMissingInfoCard() : null}
+        </div>
+        {notice ? <p className="legal-workflow-notice" role="status">{notice}</p> : null}
+        {!flowCardVisible && (recordingBusy || uploadingRecording) && activeCard !== "recording" ? (
+          <button type="button" className="legal-recording-indicator" onClick={() => openCard("recording")}>
+            <Mic size={14} /><span>{uploadingRecording ? t("legalDiagnosis.recording.uploading") : recordingStatusLabel(props.recorder.status)}</span><time>{formatDuration(recordSeconds)}</time><ChevronRight size={13} />
+          </button>
+        ) : null}
+        {!flowCardVisible ? <div className="legal-workflow-actions">
+          <div className="legal-workflow-shortcuts" role="group" aria-label={t("legalDiagnosis.shortcuts.title")}>
+            <button type="button" aria-expanded={activeCard === "templates"} aria-controls="legal-active-card" onClick={() => openCard("templates")}><FileDown size={14} />{t("legalDiagnosis.shortcuts.templates")}</button>
+            <button type="button" aria-expanded={activeCard === "recording"} aria-controls="legal-active-card" onClick={() => openCard("recording")}><Mic size={14} />{t("legalDiagnosis.shortcuts.recording")}</button>
+          </div>
+        </div> : null}
         {renderComposer()}
         <input ref={sourceFileInputRef} type="file" hidden multiple accept={LEGAL_DIAG_SOURCE_ACCEPT} onChange={handleSourceFilesPicked} />
         <input
@@ -488,12 +607,7 @@ export function LaborDiagnosticWorkflow(props: LaborDiagnosticWorkflowProps) {
         </div>
       );
     }
-    return recordingSkipped ? (
-      <div className="litrev-activity-history-item legal-recording-skipped" role="status">
-        <span className="legal-recording-skipped__icon" aria-hidden="true"><Minus size={11} /></span>
-        <span>{t("legalDiagnosis.recording.skippedStatus")}</span>
-      </div>
-    ) : null;
+    return null;
   }
 
   function renderIntakeActivity(finished: boolean): ReactNode {
@@ -529,24 +643,32 @@ export function LaborDiagnosticWorkflow(props: LaborDiagnosticWorkflowProps) {
   }
 
   function renderMaterialsSummary(): ReactNode {
-    const skipped = sourceItems.length === 0;
+    if (sourceItems.length > 0) return null;
     return (
-      <div className={`litrev-activity-history-item legal-materials-summary${skipped ? " legal-materials-summary--skipped" : ""}`} role="status">
+      <div className="litrev-activity-history-item legal-materials-summary legal-materials-summary--skipped" role="status">
         <span className="legal-materials-summary__icon" aria-hidden="true">
-          {skipped ? <Minus size={11} /> : <Check size={11} />}
+          <Minus size={11} />
         </span>
-        <span>{skipped
-          ? t("legalDiagnosis.sources.skippedStatus")
-          : t("legalDiagnosis.sources.confirmed", { count: sourceItems.length })}</span>
+        <span>{t("legalDiagnosis.sources.skippedStatus")}</span>
       </div>
     );
   }
 
-  function renderAck(entry: { id: number; text: string; reply?: string }): ReactNode {
+  function renderAck(entry: { id: number; text: string; reply?: string; files: LegalDiagSourceItem[] }): ReactNode {
     return (
       <div key={entry.id} className="litrev-supplement">
         <div className="litrev-user-message">
-          <div className="agent-chat-bubble agent-chat-bubble--user litrev-user-bubble">{entry.text}</div>
+          {entry.files.length ? (
+            <div className="legal-message-files">
+              {entry.files.map((file) => (
+                <button type="button" className="legal-message-file" key={file.id} onClick={() => props.onOpenArtifact?.(legalMaterialWorkspacePath(file))}>
+                  <FileTypeIcon name={file.label} surface="row" />
+                  <span><strong>{file.label}</strong><small>{formatSourceSize(file.totalBytes)}</small></span>
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {entry.text ? <div className="agent-chat-bubble agent-chat-bubble--user litrev-user-bubble">{entry.text}</div> : null}
         </div>
         <p className="litrev-assistant-copy">{entry.reply ?? LEGAL_DIAG_MESSAGE_ACK}</p>
       </div>
@@ -563,10 +685,10 @@ export function LaborDiagnosticWorkflow(props: LaborDiagnosticWorkflowProps) {
           return (
             <div key={item} className={`litrev-todo__item${done ? " litrev-todo__item--done" : current ? " litrev-todo__item--current" : ""}`}>
               <span className="litrev-todo__status">
-                {done ? <Check size={11} /> : current ? <CircleDashed size={11} className="litrev-spin" /> : null}
+                {done ? <Check size={11} /> : current ? awaitingVerification ? <Pencil size={11} /> : <CircleDashed size={11} className="litrev-spin" /> : null}
               </span>
               <strong>{item}</strong>
-              {current ? <small>{t("legalDiagnosis.stage.tasks.running")}</small> : null}
+              {current ? <small>{t(awaitingVerification ? "legalDiagnosis.stage.tasks.awaitingVerification" : "legalDiagnosis.stage.tasks.running")}</small> : null}
             </div>
           );
         })}
@@ -608,11 +730,6 @@ export function LaborDiagnosticWorkflow(props: LaborDiagnosticWorkflowProps) {
       <>
         {renderTaskActivity(finished)}
         {renderTaskOutputMessages()}
-        {!finished
-          && todoProgress === LEGAL_DIAG_MISSING_INFO_TODO_INDEX
-          && missingInfoCardStatus === "open"
-          ? <p className="litrev-assistant-copy">{LEGAL_DIAG_MISSING_INFO_INTRO}</p>
-          : null}
       </>
     );
     if (!finished) return processContent;
@@ -642,10 +759,11 @@ export function LaborDiagnosticWorkflow(props: LaborDiagnosticWorkflowProps) {
 
   function renderResult(): ReactNode {
     const files = [
-      { path: LEGAL_DIAG_RECORDING_PATH, format: "M4A" },
-      { path: "transcripts/访谈转写.txt", format: "TXT" },
-      { path: "diagnostics/用工合规及风险诊断表.xlsx", format: "XLSX" },
-      { path: "reports/用工风险与合规诊断报告.docx", format: "DOCX" }
+      ...(transcript ? [
+        { path: LEGAL_DIAG_RECORDING_PATH, format: "M4A" },
+        { path: LEGAL_DIAG_TRANSCRIPT_PATH, format: "TXT" }
+      ] : []),
+      { path: LEGAL_DIAG_REPORT_PATH, format: "DOCX" }
     ];
     return (
       <>
@@ -707,7 +825,7 @@ export function LaborDiagnosticWorkflow(props: LaborDiagnosticWorkflowProps) {
   }
 
   function renderMissingInfoCard(): ReactNode {
-    const canSubmit = LEGAL_DIAG_MISSING_INFO_QUESTIONS.every((question) => Boolean(missingInfoAnswers[question.id]));
+    const canSubmit = LEGAL_DIAG_MISSING_INFO_QUESTIONS.some((question) => Boolean(missingInfoAnswers[question.id]));
     return (
       <section className="litrev-question-card legal-missing-info-card" aria-label={t("legalDiagnosis.missingInfo.title")}>
         <header className="litrev-question-card__head">
@@ -790,34 +908,26 @@ export function LaborDiagnosticWorkflow(props: LaborDiagnosticWorkflowProps) {
     const status = props.recorder.status;
     const recording = status === "recording";
     const paused = status === "paused";
-    const transcribing = status === "transcribing";
-    const busy = props.recorder.isStarting || transcribing || uploadingRecording;
+    const processing = props.recorder.isStarting || props.recorder.isTranscribing || uploadingRecording;
+    const label = uploadingRecording ? t("legalDiagnosis.recording.uploading")
+      : recording || paused || processing ? recordingStatusLabel(status)
+      : t("legalDiagnosis.shortcuts.recording");
     return (
-      <section className="litrev-wizard-card legal-record-card" aria-label={t("legalDiagnosis.recording.cardTitle")}>
-        <header className="litrev-wizard-card__head">
-          <strong>{t("legalDiagnosis.recording.cardTitle")}</strong>
-          <button type="button" className="litrev-wizard-card__close" aria-label={t("legalDiagnosis.recording.skip")} disabled={busy} onClick={skipRecording}>
-            <X size={15} />
-          </button>
-        </header>
-        <div className="litrev-wizard-card__body legal-record-card__body">
-          <p className="legal-record-card__hint">{t("legalDiagnosis.recording.hint")}</p>
-          <div className={`legal-record-meter${recording ? " legal-record-meter--active" : ""}${paused ? " legal-record-meter--paused" : ""}`}>
-            <span className="legal-record-meter__icon"><Mic size={18} /></span>
-            <div className="legal-record-meter__copy" aria-live="polite"><strong>{uploadingRecording ? t("legalDiagnosis.recording.uploading") : recordingStatusLabel(status)}</strong><time>{formatDuration(recordSeconds)}</time></div>
-            <span className="legal-record-meter__wave" aria-hidden="true">{Array.from({ length: 12 }, (_, index) => <i key={index} />)}</span>
-          </div>
-          {recordingError ? <p className="legal-record-card__error" role="alert">{recordingError}</p> : null}
-          <div className="legal-record-card__actions">
-            {!recording && !paused && !transcribing && !uploadingRecording ? (
-              <>
-                <Button type="button" variant="primary" size="sm" disabled={busy} onClick={() => void startRecording()}>
-                  <Mic size={13} /> {t("legalDiagnosis.recording.start")}
-                </Button>
-                <Button type="button" variant="secondary" size="sm" disabled={busy} onClick={() => recordingFileInputRef.current?.click()}>
-                  <Upload size={13} /> {t("legalDiagnosis.recording.upload")}
-                </Button>
-              </>
+      <section className="litrev-wizard-card legal-record-card" aria-label={t("legalDiagnosis.shortcuts.recording")}>
+        <div className={`legal-record-strip${recording ? " legal-record-strip--active" : ""}${paused ? " legal-record-strip--paused" : ""}`}>
+          <span className="legal-record-strip__icon" aria-hidden="true">
+            {processing ? <CircleDashed size={18} className="litrev-spin" /> : <Mic size={18} />}
+          </span>
+          <strong className="legal-record-strip__label" aria-live="polite">{label}</strong>
+          <time className="legal-record-strip__time">{formatDuration(recordSeconds)}</time>
+          <span className="legal-record-strip__wave" aria-hidden="true">
+            {[4, 6, 10, 6, 14, 20, 12, 8, 18, 26, 16, 10, 22, 30, 18, 12, 24, 16, 8, 20, 26, 14, 10, 18, 12, 6, 10, 4].map((height, index) => (
+              <i key={index} style={{ height, animationDelay: `${-index * 85}ms` }} />
+            ))}
+          </span>
+          <div className="legal-record-strip__actions">
+            {!recording && !paused && !processing ? (
+              <Button type="button" variant="primary" size="sm" onClick={() => void startRecording()}>{t("legalDiagnosis.recording.start")}</Button>
             ) : null}
             {recording || paused ? (
               <>
@@ -825,32 +935,39 @@ export function LaborDiagnosticWorkflow(props: LaborDiagnosticWorkflowProps) {
                   {paused ? <Play size={13} /> : <Pause size={13} />}{t(paused ? "legalDiagnosis.recording.resume" : "legalDiagnosis.recording.pause")}
                 </Button>
                 <Button type="button" variant="primary" size="sm" onClick={() => void finishRecording()}>
-                  <Square size={12} /> {t("legalDiagnosis.recording.finish")}
+                  <Square size={12} />{t("legalDiagnosis.recording.finish")}
                 </Button>
               </>
             ) : null}
-            {transcribing || uploadingRecording ? <Button type="button" variant="secondary" size="sm" disabled>{t(uploadingRecording ? "legalDiagnosis.recording.uploading" : "legalDiagnosis.recording.transcribing")}</Button> : null}
           </div>
-          <input
-            ref={recordingFileInputRef}
-            type="file"
-            hidden
-            accept="audio/*,.wav,.m4a,.mp3,.mp4,.webm"
-            onChange={(event) => void handleRecordingFilePicked(event)}
-          />
+          <button type="button" className="litrev-wizard-card__close" aria-label={t("legalDiagnosis.workflow.close")} onClick={dismissCard}><X size={15} /></button>
         </div>
+        {recordingError ? <p className="legal-record-card__error legal-record-strip__error" role="alert">{recordingError}</p> : null}
       </section>
     );
   }
 
   function renderMaterialsCard(): ReactNode {
+    const busy = recordingBusy || uploadingRecording || props.phase.kind === "thinking" || props.phase.kind === "task";
     return (
-      <section className="litrev-wizard-card litrev-source-card" aria-label={t("legalDiagnosis.sources.title")}>
+      <section
+        className="litrev-wizard-card litrev-source-card"
+        aria-label={t("legalDiagnosis.sources.title")}
+        onDragOver={(event) => {
+          if (!event.dataTransfer.types.includes("Files")) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "copy";
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          addSourceFiles([...event.dataTransfer.files], false);
+        }}
+      >
         <header className="litrev-wizard-card__head">
           <strong>{t("legalDiagnosis.sources.title")}</strong>
           <div className="litrev-wizard-card__head-actions">
             {sourceItems.length ? <span className="litrev-wizard-card__count">{t("legalDiagnosis.sources.count", { count: sourceItems.length })}</span> : null}
-            <button type="button" className="litrev-wizard-card__close" aria-label={t("legalDiagnosis.workflow.close")} onClick={confirmMaterials}><X size={15} /></button>
+            <button type="button" className="litrev-wizard-card__close" aria-label={t("legalDiagnosis.workflow.close")} onClick={dismissCard}><X size={15} /></button>
           </div>
         </header>
         <div className="litrev-wizard-card__body litrev-source-card__body">
@@ -858,36 +975,45 @@ export function LaborDiagnosticWorkflow(props: LaborDiagnosticWorkflowProps) {
           {sourceItems.length ? (
             <div className="litrev-source-list">
               {sourceItems.map((item) => (
-                <div className="litrev-source-list__row" key={item.id}>
-                  <FileTypeIcon name={item.label} surface="row" />
-                  <span className="litrev-source-list__name" title={item.label}>{item.label}</span>
-                  <small>{formatSourceSize(item.totalBytes)}</small>
-                  <button type="button" aria-label={`${t("common.remove")}: ${item.label}`} onClick={() => removeSourceItem(item.id)}><X size={13} /></button>
+                <div className="litrev-source-list__row legal-material-row" key={item.id}>
+                  <button type="button" className="legal-material-file" title={item.label} onClick={() => props.onOpenArtifact?.(legalMaterialWorkspacePath(item))}>
+                    <FileTypeIcon name={item.label} surface="row" />
+                    <span className="legal-material-file__name">{item.label}</span>
+                    <small>{formatSourceSize(item.totalBytes)}</small>
+                  </button>
+                  {!acks.some((entry) => entry.files.some((file) => file.id === item.id)) ? (
+                    <button type="button" className="legal-material-remove" aria-label={`${t("common.remove")}: ${item.label}`} onClick={() => removeSourceItem(item.id)}><X size={13} /></button>
+                  ) : null}
                 </div>
               ))}
             </div>
-          ) : <div className="litrev-source-card__empty">{t("legalDiagnosis.sources.empty")}</div>}
-          {unsupportedCount ? <p className="litrev-source-card__notice" role="alert">{t("legalDiagnosis.sources.unsupported", { count: unsupportedCount })}</p> : null}
+          ) : (
+            <button type="button" className="litrev-source-card__empty legal-materials-dropzone" onClick={() => {
+              addPickedSourcesToComposerRef.current = false;
+              sourceFileInputRef.current?.click();
+            }}>{t("legalDiagnosis.sources.empty")}</button>
+          )}
           <div className="litrev-source-card__actions">
             <Button type="button" variant="secondary" size="sm" onClick={() => {
               addPickedSourcesToComposerRef.current = false;
               sourceFileInputRef.current?.click();
-            }}><Plus size={12} /> {t("legalDiagnosis.sources.addFiles")}</Button>
+            }}><Plus size={12} />{t("legalDiagnosis.sources.addFiles")}</Button>
             <Button type="button" variant="secondary" size="sm" onClick={() => {
               addPickedSourcesToComposerRef.current = false;
               sourceFolderInputRef.current?.click();
-            }}><Folder size={13} /> {t("legalDiagnosis.sources.addFolder")}</Button>
+            }}><Folder size={13} />{t("legalDiagnosis.sources.addFolder")}</Button>
           </div>
         </div>
-        <footer className="litrev-wizard-card__foot"><i />
-          <Button type="button" variant="primary" size="sm" onClick={confirmMaterials}>{t(sourceItems.length ? "legalDiagnosis.sources.confirm" : "legalDiagnosis.sources.skip")}</Button>
+        <footer className="litrev-wizard-card__foot">
+          <small className="legal-materials-formats" title={t("legalDiagnosis.sources.formatsDetail")}>{t("legalDiagnosis.sources.formats")}</small>
+          <Button type="button" variant="primary" size="sm" disabled={busy} onClick={() => startReport()}>{t("legalDiagnosis.sources.confirm")}</Button>
         </footer>
       </section>
     );
   }
 
   function renderComposer(): ReactNode {
-    const canSend = Boolean(props.composerDraft.trim());
+    const canSend = Boolean(props.composerDraft.trim() || composerContextIds.length);
     const composerRecorder = props.composerRecorder;
     const composerContextItems = sourceItems.filter((item) => composerContextIds.includes(item.id));
     const slashQuery = slashMenuDismissed
@@ -900,10 +1026,10 @@ export function LaborDiagnosticWorkflow(props: LaborDiagnosticWorkflowProps) {
       : filterSlashCommands(props.slashCommands ?? [], slashQuery, recentSlashCommands);
     const slashMenuOpen = filteredSlashCommands.length > 0;
     return (
-      <div className="litrev-composer" onDragOver={handleComposerSourceDragOver} onDrop={handleComposerSourceDrop}>
+      <div className="litrev-composer legal-chat-composer" onDragOver={handleComposerSourceDragOver} onDrop={handleComposerSourceDrop}>
         {composerContextItems.length ? (
-          <div className="legal-composer-contexts" aria-label={t("legalDiagnosis.sources.title")}>
-            {composerContextItems.slice(-3).map((item) => (
+          <div className="legal-composer-contexts" aria-label={t("legalDiagnosis.composer.attachments")}>
+            {composerContextItems.map((item) => (
               <span key={item.id} className="legal-composer-context-chip" title={item.label}>
                 <FileTypeIcon name={item.label} surface="inline" />
                 <span>{item.label}</span>
@@ -916,138 +1042,142 @@ export function LaborDiagnosticWorkflow(props: LaborDiagnosticWorkflowProps) {
                 </button>
               </span>
             ))}
-            {composerContextItems.length > 3 ? <small>+{composerContextItems.length - 3}</small> : null}
           </div>
         ) : null}
-        <textarea
-          ref={composerInputRef}
-          rows={3}
-          value={props.composerDraft}
-          placeholder={t(props.phase.kind === "review" || props.phase.kind === "task" ? "legalDiagnosis.composer.task" : "legalDiagnosis.composer.setup")}
-          onChange={(event) => {
-            props.onComposerDraftChange(event.target.value);
-            setSlashPickerOpen(false);
-            setSlashMenuDismissed(false);
-            setSelectedSlashCommandIndex(0);
-          }}
-          onKeyDown={(event) => {
-            if (slashMenuOpen) {
-              if (event.key === "ArrowDown") {
-                event.preventDefault();
-                setSelectedSlashCommandIndex((index) => (index + 1) % filteredSlashCommands.length);
-                return;
+        {unsupportedCount ? <p className="litrev-composer__error" role="alert">{t("legalDiagnosis.sources.unsupported", { count: unsupportedCount })}</p> : null}
+        <div className="legal-composer-input-region">
+          <textarea
+            ref={composerInputRef}
+            rows={1}
+            value={props.composerDraft}
+            placeholder={t(props.phase.kind === "review" || props.phase.kind === "task" ? "legalDiagnosis.composer.task" : "legalDiagnosis.composer.setup")}
+            onChange={(event) => {
+              props.onComposerDraftChange(event.target.value);
+              setSlashPickerOpen(false);
+              setSlashMenuDismissed(false);
+              setSelectedSlashCommandIndex(0);
+            }}
+            onKeyDown={(event) => {
+              if (slashMenuOpen) {
+                if (event.key === "ArrowDown") {
+                  event.preventDefault();
+                  setSelectedSlashCommandIndex((index) => (index + 1) % filteredSlashCommands.length);
+                  return;
+                }
+                if (event.key === "ArrowUp") {
+                  event.preventDefault();
+                  setSelectedSlashCommandIndex((index) => (index - 1 + filteredSlashCommands.length) % filteredSlashCommands.length);
+                  return;
+                }
+                if (event.key === "Enter" || event.key === "Tab") {
+                  event.preventDefault();
+                  const command = filteredSlashCommands[selectedSlashCommandIndex] ?? filteredSlashCommands[0];
+                  if (command) selectComposerSlashCommand(command);
+                  return;
+                }
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  setSlashMenuDismissed(true);
+                  setSlashPickerOpen(false);
+                  return;
+                }
               }
-              if (event.key === "ArrowUp") {
+              if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
-                setSelectedSlashCommandIndex((index) => (index - 1 + filteredSlashCommands.length) % filteredSlashCommands.length);
-                return;
+                submitComposer();
               }
-              if (event.key === "Enter" || event.key === "Tab") {
-                event.preventDefault();
-                const command = filteredSlashCommands[selectedSlashCommandIndex] ?? filteredSlashCommands[0];
-                if (command) selectComposerSlashCommand(command);
-                return;
-              }
-              if (event.key === "Escape") {
-                event.preventDefault();
-                setSlashMenuDismissed(true);
-                setSlashPickerOpen(false);
-                return;
-              }
-            }
-            if (event.key === "Enter" && !event.shiftKey) {
-              event.preventDefault();
-              submitComposer();
-            }
-          }}
-        />
-        <div className="composer-quick-actions">
-          <details ref={composerAttachMenuRef} className="agent-composer-attach-menu composer-quick-actions__anchor">
-            <summary
-              className="composer-quick-actions__btn"
-              role="button"
-              aria-label={t("home.quick.attach")}
-              aria-haspopup="menu"
-              title={t("home.quick.attachHint")}
-              onClick={() => {
-                setSlashPickerOpen(false);
-                setSlashMenuDismissed(true);
-              }}
-            >
-              <Plus size={15} />
-            </summary>
-            <div className="agent-composer-attach-menu__popover" role="menu">
-              <button
-                type="button"
-                role="menuitem"
-                onClick={(event) => {
-                  event.currentTarget.closest("details")?.removeAttribute("open");
-                  addPickedSourcesToComposerRef.current = true;
-                  sourceFileInputRef.current?.click();
-                }}
-              >
-                {t("home.quick.uploadFile")}
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                onClick={(event) => {
-                  event.currentTarget.closest("details")?.removeAttribute("open");
-                  addPickedSourcesToComposerRef.current = true;
-                  sourceFolderInputRef.current?.click();
-                }}
-              >
-                {t("home.quick.uploadFolder")}
-              </button>
-            </div>
-          </details>
-          <div className="composer-quick-actions__anchor">
-            <button
-              type="button"
-              className={`composer-quick-actions__btn${slashPickerOpen ? " composer-action-btn--active" : ""}`}
-              aria-label={t("home.quick.capability")}
-              title={t("home.quick.capabilityHint")}
-              aria-expanded={slashPickerOpen}
-              aria-haspopup="listbox"
-              onClick={() => {
-                composerAttachMenuRef.current?.removeAttribute("open");
-                setSlashMenuDismissed(false);
-                setSelectedSlashCommandIndex(0);
-                setSlashPickerOpen((open) => !open);
-                composerInputRef.current?.focus();
-              }}
-            >
-              <SquareSlash size={15} strokeWidth={2} />
-            </button>
-            {slashMenuOpen ? (
-              <div className="composer-quick-actions__popover composer-quick-actions__popover--slash">
-                <AgentCommandPalette
-                  commands={filteredSlashCommands}
-                  heading={t("home.commandPalette.commands")}
-                  selectedIndex={Math.min(selectedSlashCommandIndex, filteredSlashCommands.length - 1)}
-                  onSelect={selectComposerSlashCommand}
-                />
-              </div>
-            ) : null}
-          </div>
+            }}
+          />
         </div>
-        {composerVoiceError ? <p className="litrev-composer__error" role="alert">{composerVoiceError}</p> : null}
-        <div className="litrev-composer__actions">
-          {props.modelSelector}
-          {composerRecorder ? (
-            <button
-              type="button"
-              className={`litrev-composer__voice${composerRecorder.isRecording ? " litrev-composer__voice--active" : ""}`}
-              aria-label={t("home.voiceInput")}
-              aria-pressed={composerRecorder.isRecording}
-              title={t("home.voiceInput")}
-              disabled={composerRecorder.isTranscribing || composerRecorder.isStarting}
-              onClick={() => void toggleComposerVoiceInput()}
-            >
-              {composerRecorder.isRecording ? <Pause size={15} /> : <Mic size={15} />}
-            </button>
-          ) : null}
-          <button type="button" className={`litrev-composer__send${canSend ? " litrev-composer__send--ready" : ""}`} aria-label={t("home.send")} disabled={!canSend} onClick={submitComposer}><Send size={14} /></button>
+        <div className="legal-composer-toolbar">
+          <div className="composer-quick-actions">
+            <details ref={composerAttachMenuRef} className="agent-composer-attach-menu composer-quick-actions__anchor">
+              <summary
+                className="composer-quick-actions__btn"
+                role="button"
+                aria-label={t("home.quick.attach")}
+                aria-haspopup="menu"
+                title={t("home.quick.attachHint")}
+                onClick={() => {
+                  setSlashPickerOpen(false);
+                  setSlashMenuDismissed(true);
+                }}
+              >
+                <Plus size={15} />
+              </summary>
+              <div className="agent-composer-attach-menu__popover" role="menu">
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={(event) => {
+                    event.currentTarget.closest("details")?.removeAttribute("open");
+                    addPickedSourcesToComposerRef.current = true;
+                    sourceFileInputRef.current?.click();
+                  }}
+                >
+                  {t("home.quick.uploadFile")}
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={(event) => {
+                    event.currentTarget.closest("details")?.removeAttribute("open");
+                    addPickedSourcesToComposerRef.current = true;
+                    sourceFolderInputRef.current?.click();
+                  }}
+                >
+                  {t("home.quick.uploadFolder")}
+                </button>
+              </div>
+            </details>
+            <div className="composer-quick-actions__anchor">
+              <button
+                type="button"
+                className={`composer-quick-actions__btn${slashPickerOpen ? " composer-action-btn--active" : ""}`}
+                aria-label={t("home.quick.capability")}
+                title={t("home.quick.capabilityHint")}
+                aria-expanded={slashPickerOpen}
+                aria-haspopup="listbox"
+                onClick={() => {
+                  composerAttachMenuRef.current?.removeAttribute("open");
+                  setSlashMenuDismissed(false);
+                  setSelectedSlashCommandIndex(0);
+                  setSlashPickerOpen((open) => !open);
+                  composerInputRef.current?.focus();
+                }}
+              >
+                <SquareSlash size={15} strokeWidth={2} />
+              </button>
+              {slashMenuOpen ? (
+                <div className="composer-quick-actions__popover composer-quick-actions__popover--slash">
+                  <AgentCommandPalette
+                    commands={filteredSlashCommands}
+                    heading={t("home.commandPalette.commands")}
+                    selectedIndex={Math.min(selectedSlashCommandIndex, filteredSlashCommands.length - 1)}
+                    onSelect={selectComposerSlashCommand}
+                  />
+                </div>
+              ) : null}
+            </div>
+          </div>
+          {composerVoiceError ? <p className="litrev-composer__error" role="alert">{composerVoiceError}</p> : null}
+          <div className="litrev-composer__actions">
+            {props.modelSelector}
+            {composerRecorder ? (
+              <button
+                type="button"
+                className={`litrev-composer__voice${composerRecorder.isRecording ? " litrev-composer__voice--active" : ""}`}
+                aria-label={t("home.voiceInput")}
+                aria-pressed={composerRecorder.isRecording}
+                title={t("home.voiceInput")}
+                disabled={composerRecorder.isTranscribing || composerRecorder.isStarting}
+                onClick={() => void toggleComposerVoiceInput()}
+              >
+                {composerRecorder.isRecording ? <Pause size={15} /> : <Mic size={15} />}
+              </button>
+            ) : null}
+            <button type="button" className={`litrev-composer__send${canSend ? " litrev-composer__send--ready" : ""}`} aria-label={t("home.send")} disabled={!canSend} onClick={submitComposer}><Send size={14} /></button>
+          </div>
         </div>
       </div>
     );

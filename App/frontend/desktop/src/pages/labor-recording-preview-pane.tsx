@@ -88,7 +88,7 @@ export interface LegalRecordingCollectionPreviewProps {
   activeLabel: string;
   canSkip?: boolean;
   onStart: () => void;
-  onUpload: (file: File) => void;
+  onUpload?: (file: File) => void;
   onSkip?: () => void;
   onSelect: (id: string) => void;
   onRename?: (id: string, name: string) => void;
@@ -249,9 +249,9 @@ export function LegalRecordingCollectionPreview(props: LegalRecordingCollectionP
         <header className="legal-recording-library__toolbar">
           <strong>{t("legalDiagnosis.recording.library.title")}</strong>
           <div>
-            <Button type="button" variant="secondary" size="sm" disabled={busy} onClick={() => uploadInputRef.current?.click()}>
+            {props.onUpload ? <Button type="button" variant="secondary" size="sm" disabled={busy} onClick={() => uploadInputRef.current?.click()}>
               <Upload size={13} /> {t("legalDiagnosis.recording.upload")}
-            </Button>
+            </Button> : null}
             <Button type="button" variant="primary" size="sm" disabled={busy} onClick={props.onStart}>
               <Mic size={13} /> {t("legalDiagnosis.recording.start")}
             </Button>
@@ -368,7 +368,7 @@ export function LegalRecordingCollectionPreview(props: LegalRecordingCollectionP
         {props.canSkip && props.onSkip ? (
           <button type="button" className="legal-recording-library__skip" onClick={props.onSkip}>{t("legalDiagnosis.recording.skip")}</button>
         ) : null}
-        <input
+        {props.onUpload ? <input
           ref={uploadInputRef}
           type="file"
           hidden
@@ -376,9 +376,9 @@ export function LegalRecordingCollectionPreview(props: LegalRecordingCollectionP
           onChange={(event) => {
             const file = event.target.files?.[0];
             event.target.value = "";
-            if (file) props.onUpload(file);
+            if (file) props.onUpload?.(file);
           }}
-        />
+        /> : null}
       </div>
     );
 

@@ -2,10 +2,10 @@
 
 import type { WorkspacePreviewContent } from "../components/workspace-preview-pane.js";
 
-export const LEGAL_DIAG_ASSISTANT_INTRO = "点击右侧话筒打开录音列表并开始现场录音。停录转写后，可以继续补充企业提供和律师填写的材料；不需要提前逐项填写信息。";
+export const LEGAL_DIAG_ASSISTANT_INTRO = "可以先下载模板准备访谈，也可以直接录音，或通过对话框上传已有资料。需要补充说明时，直接在对话里告诉我。";
 export const LEGAL_DIAG_MESSAGE_ACK = "收到，我会结合当前任务继续处理。";
-export const LEGAL_DIAG_EXECUTION_INTRO = "录音和补充材料已经进入本次诊断。我会自动整理事实、填写诊断底稿并生成报告，不再要求逐项确认。";
-export const LEGAL_DIAG_RESULT_LINE = "本次诊断产物已经生成。右侧可查看访谈录音、正式转写、163 项诊断表和诊断报告。";
+export const LEGAL_DIAG_EXECUTION_INTRO = "我会结合访谈转写和调研材料整理事实、核对依据，生成用工风险诊断报告。";
+export const LEGAL_DIAG_RESULT_LINE = "用工风险诊断报告已生成，可在下方查看本次产物。";
 
 export interface LegalDiagMissingInfoQuestion {
   id: "overtimeRecords" | "occupationalInjury";
@@ -26,7 +26,7 @@ export const LEGAL_DIAG_MISSING_INFO_QUESTIONS: LegalDiagMissingInfoQuestion[] =
   }
 ];
 
-export const LEGAL_DIAG_MISSING_INFO_INTRO = "诊断底稿已完成，还有 2 项信息会影响后续判定。可以在下方卡片补充；暂不补充时，正式报告仍会生成，并将对应项目保留为待核实。";
+export const LEGAL_DIAG_MISSING_INFO_INTRO = "请先核实以下关键信息，再继续生成报告；暂时无法确认的项目可保留为待核实。";
 
 export const LEGAL_DIAG_THINKING_STAGES = [
   "整理录音转写和补充材料",
@@ -34,20 +34,22 @@ export const LEGAL_DIAG_THINKING_STAGES = [
   "定位缺失信息和相互冲突的说法"
 ];
 
+export const LEGAL_DIAG_VERIFICATION_TODO_INDEX = 2;
+
 export const LEGAL_DIAG_TODO_ITEMS = [
-  "保存访谈录音和正式转写稿",
-  "填写 151 项用工诊断与 12 项税务专项",
-  "生成风险判定与待核实清单",
-  "带出 T / P / S 分流和建议期次",
-  "生成用工风险与合规诊断报告"
+  "整理访谈转写和调研材料",
+  "核对诊断项目与材料依据",
+  "核实关键信息",
+  "确定整改优先级",
+  "生成用工风险诊断报告"
 ];
 
 export const LEGAL_DIAG_TODO_OUTPUTS = [
-  "已保存访谈录音和正式转写稿",
-  "已完成 163 项诊断底稿预填",
-  "已生成风险判定与待核实清单",
-  "已生成 T / P / S 分流和建议期次",
-  "已生成可编辑的用工风险与合规诊断报告"
+  "已整理访谈转写和调研材料",
+  "已核对诊断项目与材料依据",
+  "已整理补充信息和待核实项",
+  "已确定整改优先级",
+  "已生成可编辑的用工风险诊断报告"
 ];
 
 export interface LegalDiagExceptionItem {
@@ -65,7 +67,7 @@ export const LEGAL_DIAG_EXCEPTION_ITEMS: LegalDiagExceptionItem[] = [
 ];
 
 export const LEGAL_DIAG_REPORT_PREVIEW: WorkspacePreviewContent = {
-  title: "用工风险与合规诊断报告",
+  title: "用工风险诊断报告",
   sections: [
     { heading: "一、诊断背景与方法", body: "本次诊断综合现场访谈录音、企业资料和律师记录，对 151 项用工诊断与 12 项税务专项逐项核查。" },
     { heading: "二、企业基本情况", body: "企业基本画像由录音和上传材料共同提取；仅有口述、尚未获得材料验证的内容会单独标识。" },
@@ -73,15 +75,5 @@ export const LEGAL_DIAG_REPORT_PREVIEW: WorkspacePreviewContent = {
     { heading: "四、证据状态", body: "已区分口头访谈、文件验证、说法冲突和待补材料。录音及资料均未覆盖的项目统一标为待核实。" },
     { heading: "五、十大板块对照", body: "高风险、中风险、低风险、合规与待核实项目已按十大板块汇总，并保留每项判定依据。" },
     { heading: "六、整改安排", body: "T 补文本、P 建流程、S 出方案及建议期次已按诊断主表自动带出，本期不继续执行分流后的工作。" }
-  ]
-};
-
-export const LEGAL_DIAG_WORKSHEET_PREVIEW: WorkspacePreviewContent = {
-  title: "用工合规及风险诊断表",
-  sections: [
-    { heading: "诊断范围", body: "151 项用工诊断 + 12 项税务专项，共 163 项。" },
-    { heading: "已确认", body: "录音和材料共同覆盖的项目已填写企业现状，并附上对应依据。" },
-    { heading: "待律师确认", body: "口述与材料不一致的项目暂不自动定级，等待律师确认。" },
-    { heading: "待核实", body: "录音和材料均未涉及的项目不推断为合规或违规，统一列入待核实清单。" }
   ]
 };

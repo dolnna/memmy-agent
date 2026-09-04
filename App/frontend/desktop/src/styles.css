@@ -12987,6 +12987,268 @@ input[type="checkbox"].check-sky:checked::after {
   display: none;
 }
 
+/* The decorative glow extends below the frame; focus must not scroll the shell. */
+.app-frame-main:has(.legal-chat-composer) {
+  overflow: clip;
+}
+
+.legal-workflow-dock {
+  flex-shrink: 1;
+  min-height: 0;
+  max-height: calc(100% - 100px);
+  padding-bottom: 20px;
+}
+
+.legal-active-card {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 1px;
+}
+
+.legal-active-card:empty { display: none; }
+
+.legal-active-card--questions {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.legal-active-card--questions > .legal-missing-info-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.legal-missing-info-card > .litrev-question-card__head,
+.legal-missing-info-card > .litrev-question-card__foot {
+  flex-shrink: 0;
+}
+
+.legal-missing-info-card > .litrev-question-list {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* The scroll container clips outer shadows into dark patches at the corners. */
+.legal-active-card > .litrev-wizard-card,
+.legal-active-card > .litrev-question-card {
+  box-shadow: none;
+}
+
+.legal-workflow-dock > .litrev-composer,
+.legal-workflow-shortcuts { flex-shrink: 0; }
+
+.legal-template-card > .litrev-wizard-card__head {
+  padding: var(--space-3) var(--space-4);
+}
+
+.legal-template-card__body {
+  gap: var(--space-1);
+  padding: var(--space-2);
+}
+
+.legal-template-row {
+  display: grid;
+  grid-template-columns: var(--file-icon-card-size) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  box-sizing: border-box;
+  min-height: 64px;
+  padding: var(--space-3);
+  border-radius: var(--radius-btn);
+  color: var(--color-text-ink);
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color var(--duration-fast) ease;
+  -webkit-app-region: no-drag;
+}
+
+.legal-template-row:hover,
+.legal-template-row:focus-visible {
+  background: color-mix(in srgb, var(--color-action-sky) 8%, transparent);
+}
+
+.legal-template-row:focus-visible {
+  outline: 2px solid var(--color-action-sky);
+  outline-offset: -2px;
+}
+
+.legal-template-row__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--file-icon-card-size);
+  height: var(--file-icon-card-size);
+}
+
+.legal-template-row__icon .file-type-icon {
+  --file-icon-inline-size: var(--space-6);
+}
+
+.legal-template-row__copy {
+  min-width: 0;
+}
+
+.legal-template-row__copy strong {
+  display: block;
+  font-size: var(--codex-text-base);
+  line-height: var(--codex-leading-base);
+  font-weight: 600;
+}
+
+.legal-template-row__extension {
+  color: color-mix(in srgb, var(--color-text-ink) 60%, transparent);
+  font-size: var(--codex-text-sm);
+  font-weight: 400;
+}
+
+.legal-template-row__description {
+  margin: var(--space-1) 0 0;
+  color: color-mix(in srgb, var(--color-text-ink) 65%, transparent);
+  font-size: var(--codex-text-xs);
+  line-height: var(--codex-leading-xs);
+  overflow-wrap: anywhere;
+}
+
+.legal-template-row__action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--color-border-stone) 60%, transparent);
+  border-radius: var(--radius-btn);
+  background: var(--color-background-paper);
+  color: var(--color-action-sky-hover);
+  font-size: var(--codex-text-sm);
+  line-height: var(--codex-leading-base);
+  white-space: nowrap;
+  transition: background-color var(--duration-fast) ease;
+}
+
+.legal-template-row:hover .legal-template-row__action,
+.legal-template-row:focus-visible .legal-template-row__action {
+  background: color-mix(in srgb, var(--color-action-sky) 12%, var(--color-background-paper));
+}
+
+.legal-materials-formats {
+  cursor: help;
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  color: color-mix(in srgb, var(--color-text-ink) 65%, transparent);
+  font-size: 12px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.legal-materials-formats + .button { flex-shrink: 0; }
+
+.legal-workflow-shortcuts button,
+.legal-followup-note button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 5px 9px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: color-mix(in srgb, var(--color-text-ink) 65%, transparent);
+  font: inherit;
+  font-size: 12px;
+  text-decoration: none;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.legal-template-card__foot {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+}
+.legal-workflow-shortcuts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.legal-workflow-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* Older mounted views can survive a failed hot update during recording. */
+.legal-workflow-actions > .legal-generate-report {
+  display: none;
+}
+.legal-workflow-shortcuts button { background: color-mix(in srgb, var(--color-canvas-oat) 50%, transparent); }
+.legal-workflow-shortcuts button[aria-expanded="true"] { color: var(--color-action-sky-hover); background: color-mix(in srgb, var(--color-action-sky) 12%, transparent); }
+.legal-workflow-shortcuts button span { opacity: .7; font-variant-numeric: tabular-nums; }
+.legal-workflow-shortcuts button:hover,
+.legal-followup-note button:hover { background: color-mix(in srgb, var(--color-action-sky) 10%, transparent); color: var(--color-action-sky-hover); }
+.legal-workflow-shortcuts button:focus-visible { outline: 2px solid var(--color-action-sky); outline-offset: 2px; }
+.legal-workflow-notice { margin: 0; color: color-mix(in srgb, var(--color-text-ink) 65%, transparent); font-size: 12px; line-height: 1.6; }
+.legal-recording-indicator {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-action-sky) 10%, transparent);
+  color: var(--color-action-sky-hover);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+.legal-recording-indicator time { margin-left: auto; font-variant-numeric: tabular-nums; }
+.litrev-source-list__row.legal-material-row {
+  display: flex;
+  gap: 0;
+  min-height: 44px;
+  padding: 0;
+}
+
+.litrev-source-list__row .legal-material-file {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1;
+  min-width: 0;
+  width: auto;
+  height: auto;
+  min-height: 44px;
+  padding: var(--space-2);
+  justify-items: stretch;
+  text-align: left;
+  font-family: inherit;
+  font-size: var(--codex-text-sm);
+  line-height: var(--codex-leading-sm);
+  font-weight: 400;
+  color: var(--color-text-ink);
+}
+.legal-material-file__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.legal-material-row:hover,
+.legal-material-row:focus-within { background: color-mix(in srgb, var(--color-action-sky) 8%, transparent); }
+.litrev-source-list__row .legal-material-file:hover {
+  background: transparent;
+  color: var(--color-action-sky-hover);
+}
+.legal-material-row > .legal-material-remove { margin-right: var(--space-2); }
+.legal-followup-note p { margin-bottom: 6px; }
+
 .litrev-question-status {
   display: inline-flex;
   align-items: center;
@@ -13289,6 +13551,21 @@ input[type="checkbox"].check-sky:checked::after {
   text-align: center;
 }
 
+.litrev-source-card__empty.legal-materials-dropzone {
+  width: 100%;
+  min-height: 104px;
+  flex-shrink: 0;
+  padding: var(--space-4);
+  cursor: pointer;
+  background: transparent;
+  transition: background-color var(--duration-fast), border-color var(--duration-fast);
+}
+.legal-materials-dropzone:hover,
+.legal-materials-dropzone:focus-visible {
+  background: color-mix(in srgb, var(--color-action-sky) 8%, transparent);
+  border-color: var(--color-action-sky);
+}
+
 .litrev-source-list {
   overflow: hidden auto;
   max-height: 184px;
@@ -13363,6 +13640,114 @@ input[type="checkbox"].check-sky:checked::after {
 .litrev-source-card__actions .button {
   min-height: 32px;
   box-shadow: none;
+}
+
+.legal-record-card {
+  background: linear-gradient(110deg,
+    color-mix(in srgb, var(--color-action-sky) 7%, var(--color-background-paper)),
+    color-mix(in srgb, var(--color-action-sky) 2%, var(--color-background-paper)));
+  border-color: color-mix(in srgb, var(--color-action-sky) 24%, var(--color-border-stone));
+}
+
+.legal-record-strip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-3) var(--space-4);
+}
+
+.legal-record-strip__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  margin-right: var(--space-1);
+  border-radius: var(--radius-btn);
+  background: color-mix(in srgb, var(--color-action-sky) 12%, var(--color-background-paper));
+  color: var(--color-action-sky-hover);
+}
+
+.legal-record-strip--active .legal-record-strip__icon {
+  background: color-mix(in srgb, var(--color-status-error) 10%, var(--color-background-paper));
+  color: var(--color-status-error);
+}
+
+.legal-record-strip__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--codex-text-base);
+  line-height: var(--codex-leading-base);
+  font-weight: 600;
+}
+
+.legal-record-strip__time {
+  flex-shrink: 0;
+  color: color-mix(in srgb, var(--color-text-ink) 65%, transparent);
+  font-size: var(--codex-text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.legal-record-strip__wave {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-width: 24px;
+  height: 34px;
+  overflow: hidden;
+  color: color-mix(in srgb, var(--color-action-sky) 38%, transparent);
+  mask-image: linear-gradient(to right, transparent, black 12%, black 88%, transparent);
+}
+
+.legal-record-strip__wave i {
+  flex: 0 0 2px;
+  border-radius: var(--radius-pill);
+  background: currentColor;
+  transform-origin: center;
+}
+
+.legal-record-strip--active .legal-record-strip__wave {
+  color: var(--color-action-sky);
+}
+
+.legal-record-strip--paused .legal-record-strip__wave {
+  color: color-mix(in srgb, var(--color-text-ink) 20%, transparent);
+}
+
+@keyframes legal-record-strip-wave {
+  from { transform: scaleY(.45); }
+  to { transform: scaleY(1); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .legal-record-strip--active .legal-record-strip__wave i {
+    animation: legal-record-strip-wave 650ms ease-in-out infinite alternate;
+  }
+}
+
+.legal-record-strip__actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+.legal-record-strip__actions .button {
+  min-height: 30px;
+  padding: 0 var(--space-3);
+  font-size: var(--codex-text-sm);
+  box-shadow: none;
+}
+
+.legal-record-card .legal-record-strip__error {
+  margin: 0 var(--space-4) var(--space-3);
 }
 
 .legal-record-card__body {
@@ -14725,6 +15110,48 @@ input[type="checkbox"].check-sky:checked::after {
   outline: none;
 }
 
+/* Keep the scrollable text field separate from the always-visible toolbar. */
+.legal-composer-input-region {
+  min-width: 0;
+  padding: 12px 20px 0;
+}
+
+.legal-chat-composer .legal-composer-input-region textarea {
+  box-sizing: border-box;
+  field-sizing: content;
+  min-height: 32px;
+  max-height: 140px;
+  padding: 0;
+  border-radius: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  overscroll-behavior: contain;
+  line-height: var(--codex-leading-base);
+}
+
+.legal-composer-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  min-width: 0;
+  gap: var(--space-2);
+  padding: 4px 16px 12px;
+}
+
+.legal-composer-toolbar > .composer-quick-actions,
+.legal-composer-toolbar > .litrev-composer__actions {
+  position: relative;
+  inset: auto;
+}
+
+.legal-composer-toolbar > .composer-quick-actions { flex-shrink: 0; }
+.legal-composer-toolbar > .litrev-composer__actions {
+  min-width: 0;
+  margin-left: auto;
+}
+
 .legal-composer-contexts {
   display: flex;
   min-width: 0;
@@ -14732,6 +15159,47 @@ input[type="checkbox"].check-sky:checked::after {
   align-items: center;
   gap: 6px;
   padding: 10px 12px 0;
+  max-height: 100px;
+  overflow-y: auto;
+}
+
+.legal-message-files {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  max-width: 100%;
+}
+
+.legal-message-file {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--color-border-stone) 50%, transparent);
+  border-radius: var(--radius-btn);
+  background: var(--color-background-paper);
+  color: var(--color-text-ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.legal-message-file > span:last-child { min-width: 0; }
+.legal-message-file strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--codex-text-sm);
+  font-weight: 500;
+}
+.legal-message-file small {
+  color: color-mix(in srgb, var(--color-text-ink) 60%, transparent);
+  font-size: var(--codex-text-xs);
+}
+.legal-message-file:hover {
+  background: color-mix(in srgb, var(--color-action-sky) 8%, var(--color-background-paper));
 }
 
 .legal-composer-context-chip {
@@ -14987,10 +15455,6 @@ input[type="checkbox"].check-sky:checked::after {
   text-align: left;
   cursor: pointer;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
-}
-
-.litrev-file-card:only-child {
-  grid-column: 1 / -1;
 }
 
 .litrev-file-card__text {

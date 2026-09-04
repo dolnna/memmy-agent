@@ -5,19 +5,15 @@ import type {
   WorkspaceFilesListing
 } from "../api/memmy-agent-client.js";
 import type { WorkspacePreviewContent } from "../components/workspace-preview-pane.js";
-import {
-  LEGAL_DIAG_REPORT_PREVIEW,
-  LEGAL_DIAG_WORKSHEET_PREVIEW
-} from "./labor-diagnostic-demo-data.js";
+import { LEGAL_DIAG_REPORT_PREVIEW } from "./labor-diagnostic-demo-data.js";
 
 export const LEGAL_DIAG_RECORDING_TAB_ID = "views/访谈录音";
 export const LEGAL_DIAG_RECORDING_PATH = "recordings/访谈录音.m4a";
 export const LEGAL_DIAG_TRANSCRIPT_PATH = "transcripts/访谈转写.txt";
-export const LEGAL_DIAG_WORKSHEET_PATH = "diagnostics/用工合规及风险诊断表.xlsx";
-export const LEGAL_DIAG_REPORT_PATH = "reports/用工风险与合规诊断报告.docx";
+export const LEGAL_DIAG_REPORT_PATH = "reports/用工风险诊断报告.docx";
 
 const ROOT_LABEL = "用工风险诊断";
-export const LEGAL_DIAG_ROOT_DIRECTORIES = ["recordings", "materials", "transcripts", "diagnostics", "reports"] as const;
+export const LEGAL_DIAG_ROOT_DIRECTORIES = ["recordings", "materials", "transcripts", "reports"] as const;
 const TEXT_PREVIEW_EXTENSIONS = new Set(["txt", "md", "csv", "json"]);
 const MATERIAL_PREVIEW_LIMIT = 12_000;
 
@@ -158,14 +154,9 @@ export function buildLegalDiagWorkspaceListing(
   if (relativePath === "materials" || relativePath.startsWith("materials/")) {
     return listing(relativePath, materialDirectoryEntries(relativePath, state.materials));
   }
-  if (relativePath === "diagnostics") {
-    return listing(relativePath, state.outputsReady
-      ? [file("用工合规及风险诊断表.xlsx", LEGAL_DIAG_WORKSHEET_PATH, 6_800)]
-      : []);
-  }
   if (relativePath === "reports") {
     return listing(relativePath, state.outputsReady
-      ? [file("用工风险与合规诊断报告.docx", LEGAL_DIAG_REPORT_PATH, 4_200)]
+      ? [file("用工风险诊断报告.docx", LEGAL_DIAG_REPORT_PATH, 4_200)]
       : []);
   }
   return listing(relativePath, []);
@@ -209,7 +200,6 @@ export async function loadLegalDiagWorkspacePreview(
       sections: [{ heading: "自动转写", body: state.transcript.trim() }]
     };
   }
-  if (path === LEGAL_DIAG_WORKSHEET_PATH) return LEGAL_DIAG_WORKSHEET_PREVIEW;
   if (path === LEGAL_DIAG_REPORT_PATH) return LEGAL_DIAG_REPORT_PREVIEW;
 
   const material = findLegalDiagMaterial(path, state.materials);

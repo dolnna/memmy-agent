@@ -360,16 +360,10 @@ export function LaborDiagnosticPage() {
         items={recordingItems}
         activeState={selectedState}
         activeLabel={selectedRecording?.label ?? t("legalDiagnosis.recording.preview.recordingTitle")}
-        canSkip={phase.kind === "recording"}
         onStart={() => {
           setRecordingSurface("session");
           void recordingControllerRef.current?.start();
         }}
-        onUpload={(file) => {
-          setRecordingSurface("session");
-          void recordingControllerRef.current?.upload(file);
-        }}
-        onSkip={() => recordingControllerRef.current?.skip()}
         onSelect={(id) => {
           setSelectedRecordingId(id);
           setRecordingSurface("session");
@@ -445,6 +439,11 @@ export function LaborDiagnosticPage() {
             transcribeRecordingFile={transcribeRecordingFile}
             onTranscriptReady={(next) => setTranscript((current) => current ? `${current}\n\n${next}` : next)}
             onRecordingPreviewChange={updateRecordingPreview}
+            onOpenRecording={() => {
+              setSelectedRecordingId(recordingId);
+              setRecordingSurface("session");
+              openArtifact(LEGAL_DIAG_RECORDING_TAB_ID, { fileTreeOpen: false });
+            }}
             recordingControllerRef={recordingControllerRef}
             onSourcesChange={setSourceItems}
             onOpenArtifact={openArtifact}
