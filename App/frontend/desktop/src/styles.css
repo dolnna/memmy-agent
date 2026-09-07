@@ -15202,43 +15202,6 @@ input[type="checkbox"].check-sky:checked::after {
   background: color-mix(in srgb, var(--color-action-sky) 8%, var(--color-background-paper));
 }
 
-.legal-composer-context-chip {
-  display: inline-flex;
-  min-width: 0;
-  max-width: min(210px, 100%);
-  height: 28px;
-  align-items: center;
-  gap: 5px;
-  padding: 0 5px 0 7px;
-  border: 1px solid color-mix(in srgb, var(--color-border-stone) 44%, transparent);
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--color-canvas-oat) 34%, var(--color-background-paper));
-  color: color-mix(in srgb, var(--color-text-ink) 66%, transparent);
-  font-size: 10px;
-}
-
-.legal-composer-context-chip > span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.legal-composer-context-chip > button {
-  display: grid;
-  width: 20px;
-  height: 20px;
-  flex: none;
-  place-items: center;
-  border-radius: 5px;
-  color: color-mix(in srgb, var(--color-text-ink) 42%, transparent);
-}
-
-.legal-composer-context-chip > button:hover {
-  background: color-mix(in srgb, var(--color-canvas-oat) 70%, transparent);
-  color: var(--color-text-ink);
-}
-
 .legal-composer-contexts > small {
   color: color-mix(in srgb, var(--color-text-ink) 42%, transparent);
   font-size: 10px;

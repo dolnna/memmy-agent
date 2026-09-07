@@ -1,10 +1,12 @@
 // @vitest-environment happy-dom
 
-import { useState } from "react";
+import { Activity, useState } from "react";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../../i18n/i18n-provider.js";
+import { createLegalRecordingExample } from "./fixtures/recording-example.js";
+import { recordingTranscriptSourceFile } from "../labor-recording-preview-pane.js";
 import type { AsrRecorder, AsrRecorderStatus } from "../asr-recorder.js";
 import type { LegalDiagPhase } from "../labor-diagnostic-model.js";
 import type { LegalDiagSourceItem } from "../labor-diagnostic-workspace.js";
@@ -35,6 +37,7 @@ function WorkflowHarness(props: {
   finishSegments?: LegalStructuredTranscriptSegment[];
   uploadSegments?: LegalStructuredTranscriptSegment[];
   controllerRef?: { current: LegalRecordingController | null };
+  onSubmit?: (text: string) => void;
 }) {
   const [phase, setPhase] = useState<LegalDiagPhase>({ kind: "collecting" });
   const [draft, setDraft] = useState("");
@@ -116,7 +119,7 @@ function WorkflowHarness(props: {
       onOpenArtifact={props.onOpenArtifact}
       composerDraft={draft}
       onComposerDraftChange={setDraft}
-      onComposerSubmit={() => undefined}
+      onComposerSubmit={(text) => props.onSubmit?.(text)}
     />
   );
 }
@@ -299,7 +302,7 @@ describe("LaborDiagnosticWorkflow", () => {
     expect(container.querySelector(".legal-record-card")).not.toBeNull();
     expect(controllerRef.current).not.toBeNull();
     await act(async () => controllerRef.current!.addConversationFile(new File(["转写正文"], "访谈转写.txt", { type: "text/plain" })));
-    expect(container.querySelector(".legal-composer-context-chip")?.textContent).toContain("访谈转写.txt");
+    expect(container.querySelector('[data-testid="agent-attachment-card-file"]')?.getAttribute("title")).toBe("访谈转写.txt");
     await act(async () => controllerRef.current!.start());
     expect(recorderCalls).toEqual(["start"]);
     expect(phase.kind).toBe("collecting");
@@ -310,6 +313,86 @@ describe("LaborDiagnosticWorkflow", () => {
     expect(container.querySelector(".legal-generate-report")).toBeNull();
   });
 
+  it("adds a transcript through the shared attachment card, preserving the draft without duplicates or auto-send", async () => {
+    const controllerRef: { current: LegalRecordingController | null } = { current: null };
+    const onSubmit = vi.fn();
+    const example = createLegalRecordingExample();
+    const file = recordingTranscriptSourceFile(example)!;
+    let sources: LegalDiagSourceItem[] = [];
+    await act(async () => {
+      root.render(
+        <I18nProvider language="zh-CN">
+          <WorkflowHarness
+            controllerRef={controllerRef}
+            onPhase={(next) => { phase = next; }}
+            onSubmit={onSubmit}
+            onSources={(items) => { sources = items; }}
+          />
+        </I18nProvider>
+      );
+    });
+    const textarea = container.querySelector<HTMLTextAreaElement>(".litrev-composer textarea")!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(textarea, "请重点关注加班记录。");
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => controllerRef.current!.addConversationFile(file));
+    await act(async () => vi.advanceTimersByTime(20));
+    expect(document.activeElement).toBe(textarea);
+    expect(textarea.value).toBe("请重点关注加班记录。");
+    const attachment = container.querySelector('[data-testid="agent-attachment-card-file"]');
+    expect(attachment?.getAttribute("title")).toBe(file.name);
+    expect(attachment?.querySelector('[data-testid="agent-file-icon-file"]')).not.toBeNull();
+    expect(attachment?.querySelector(".agent-attachment-card__meta")?.textContent).toContain("TXT · ");
+    expect(attachment?.querySelector(".agent-attachment-card__remove")).not.toBeNull();
+    expect(sources).toHaveLength(1);
+    expect(sources[0]?.file).toBe(file);
+    expect(await sources[0]?.file?.text()).toBe(await file.text());
+
+    await act(async () => controllerRef.current!.addConversationFile(recordingTranscriptSourceFile(example)!));
+    expect(container.querySelectorAll('[data-testid="agent-attachment-card-file"]')).toHaveLength(1);
+    expect(textarea.value).toBe("请重点关注加班记录。");
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(phase.kind).toBe("collecting");
+  });
+
+  it("restores the recording controller and retains drafts and attachments when Activity becomes visible again", async () => {
+    const controllerRef: { current: LegalRecordingController | null } = { current: null };
+    const onSubmit = vi.fn();
+    const workflow = (
+      <I18nProvider language="zh-CN">
+        <WorkflowHarness
+          controllerRef={controllerRef}
+          onPhase={(next) => { phase = next; }}
+          onSubmit={onSubmit}
+        />
+      </I18nProvider>
+    );
+    const renderActivity = (mode: "visible" | "hidden") => root.render(<Activity mode={mode}>{workflow}</Activity>);
+    await act(async () => renderActivity("visible"));
+    const textarea = container.querySelector<HTMLTextAreaElement>(".litrev-composer textarea")!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(textarea, "尚未发送的补充说明");
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => controllerRef.current!.addConversationFile(new File(["原转写"], "原访谈.txt")));
+
+    await act(async () => renderActivity("hidden"));
+    expect(controllerRef.current).toBeNull();
+    await act(async () => renderActivity("visible"));
+    expect(controllerRef.current).not.toBeNull();
+    expect(container.querySelector<HTMLTextAreaElement>(".litrev-composer textarea")?.value).toBe("尚未发送的补充说明");
+    expect(container.querySelector('[data-testid="agent-attachment-card-file"]')?.getAttribute("title")).toBe("原访谈.txt");
+
+    await act(async () => controllerRef.current!.addConversationFile(new File(["补充转写"], "补充访谈.txt")));
+    expect([...container.querySelectorAll('[data-testid="agent-attachment-card-file"]')].map((card) => card.getAttribute("title"))).toEqual([
+      "原访谈.txt", "补充访谈.txt"
+    ]);
+    expect(container.querySelector<HTMLTextAreaElement>(".litrev-composer textarea")?.value).toBe("尚未发送的补充说明");
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(phase.kind).toBe("collecting");
+  });
+
   it("collects existing recordings through materials without a separate recording upload entry", async () => {
     expect(container.querySelector('input[accept^="audio/"]')).toBeNull();
     expect(container.querySelector(".legal-record-card")?.textContent).not.toContain("上传录音");
@@ -318,7 +401,7 @@ describe("LaborDiagnosticWorkflow", () => {
     await act(async () => setInputFiles(input, [new File(["audio"], "已有访谈.m4a", { type: "audio/mp4" })]));
     await act(async () => shortcut(container, "访谈录音").click());
     await act(async () => openAttachments(container));
-    expect(container.querySelector(".legal-composer-contexts")?.textContent).toContain("已有访谈.m4a");
+    expect(container.querySelector('[data-testid="agent-attachment-card-file"]')?.getAttribute("title")).toBe("已有访谈.m4a");
     expect(phase.kind).toBe("collecting");
   });
 
@@ -453,9 +536,9 @@ describe("LaborDiagnosticWorkflow", () => {
       ]);
     });
 
-    expect(container.textContent).toContain("营业执照.png");
-    expect(container.textContent).toContain("劳动合同模板.docx");
-    expect(container.textContent).toContain("律师记录.xlsx");
+    expect([...container.querySelectorAll('[data-testid="agent-attachment-card-file"]')].map((card) => card.getAttribute("title"))).toEqual([
+      "营业执照.png", "劳动合同模板.docx", "律师记录.xlsx"
+    ]);
 
     await sendText(container, "生成诊断报告");
     expect(phase.kind).toBe("thinking");
@@ -503,7 +586,7 @@ describe("LaborDiagnosticWorkflow", () => {
     await act(async () => container.querySelector<HTMLButtonElement>('.legal-template-card [aria-label="收起卡片"]')!.click());
     expect(recorderCalls).toEqual(["start"]);
     await act(async () => openAttachments(container));
-    expect(container.textContent).toContain("企业预填信息.xlsx");
+    expect(container.querySelector('[data-testid="agent-attachment-card-file"]')?.getAttribute("title")).toBe("企业预填信息.xlsx");
     expect(container.querySelector(".legal-generate-report")).toBeNull();
     await act(async () => shortcut(container, "访谈录音").click());
     await act(async () => buttonByText(container, "暂停").click());
@@ -555,13 +638,13 @@ describe("LaborDiagnosticWorkflow", () => {
     await act(async () => buttonByText(container, "开始录音").click());
     await act(async () => shortcut(container, "诊断指引").click());
     expect(container.querySelector(".legal-recording-indicator")).not.toBeNull();
-    expect(container.querySelector(".legal-composer-contexts")?.textContent).toContain("企业预填信息.xlsx");
+    expect(container.querySelector('[data-testid="agent-attachment-card-file"]')?.getAttribute("title")).toBe("企业预填信息.xlsx");
     expect(container.querySelector(".legal-generate-report")).toBeNull();
     await act(async () => shortcut(container, "访谈录音").click());
     expect(recorderCalls).toEqual(["start"]);
     await act(async () => buttonByText(container, "结束并转写").click());
     await act(async () => setInputFiles(input, [new File(["notes"], "补充访谈纪要.txt")]));
-    expect(container.querySelectorAll(".legal-composer-context-chip")).toHaveLength(2);
+    expect(container.querySelectorAll('[data-testid="agent-attachment-card-file"]')).toHaveLength(2);
     expect(buttonByText(container, "生成 AI 诊断报告").disabled).toBe(false);
     expect(recorderCalls).toEqual(["start", "finish"]);
     expect(phase.kind).toBe("collecting");
@@ -615,12 +698,12 @@ describe("LaborDiagnosticWorkflow", () => {
     const file = new File(["interview"], "访谈记录.txt");
     const input = container.querySelector<HTMLInputElement>('input[type="file"][multiple]')!;
     await act(async () => setInputFiles(input, [file]));
-    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="移除: 访谈记录.txt"], [aria-label="删除: 访谈记录.txt"], .legal-composer-context-chip button')!.click());
+    await act(async () => container.querySelector<HTMLButtonElement>('.agent-attachment-card__remove[aria-label="移除: 访谈记录.txt"], .agent-attachment-card__remove[aria-label="删除: 访谈记录.txt"]')!.click());
     expect(container.querySelector(".legal-generate-report")).toBeNull();
     await act(async () => setInputFiles(input, [file]));
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="发送"]')!.click());
     await act(async () => setInputFiles(input, [file]));
-    await act(async () => container.querySelector<HTMLButtonElement>('.legal-composer-context-chip button')!.click());
+    await act(async () => container.querySelector<HTMLButtonElement>('.agent-attachment-card__remove')!.click());
     expect(container.querySelector(".legal-composer-contexts")).toBeNull();
     expect(container.querySelectorAll(".legal-message-file")).toHaveLength(1);
     expect(container.querySelector(".legal-generate-report")).toBeNull();

@@ -382,6 +382,10 @@ export const agentActions = {
     return { type: "agent/newChatRequested" };
   },
 
+  newChatDraftPrepared(content: string, attachments: PendingAttachment[], target: WebuiSessionTarget): AppAction {
+    return { type: "agent/newChatDraftPrepared", content, attachments, target };
+  },
+
   blankDraftReopened(): AppAction {
     return { type: "agent/blankDraftReopened" };
   },

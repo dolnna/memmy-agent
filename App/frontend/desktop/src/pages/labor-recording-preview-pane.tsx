@@ -5,7 +5,7 @@ import type {
   AsrTranscriptSegment,
   AsrTranscriptWord
 } from "@memmy/local-api-contracts";
-import { ChevronLeft, MessageSquarePlus, Mic, Pause, Pencil, Play, Square, Upload } from "lucide-react";
+import { ChevronLeft, FileText, MessageSquarePlus, Mic, Pause, Pencil, Play, Sparkles, Square, Upload } from "lucide-react";
 import { Button } from "../components/button.js";
 import { classifyAgentAttachmentFile, safeAgentAttachmentFilename } from "../lib/agent-attachment.js";
 import { useTranslation } from "../i18n/use-translation.js";
@@ -93,6 +93,9 @@ export interface LegalRecordingCollectionPreviewProps {
   onSelect: (id: string) => void;
   onRename?: (id: string, name: string) => void;
   onAddToConversation?: (item: LegalRecordingViewItem) => void;
+  onSummarize?: (item: LegalRecordingViewItem) => void;
+  summaryDisabled?: boolean;
+  summaryError?: string;
   onBack: () => void;
   onPause: () => void;
   onResume: () => void;
@@ -257,6 +260,7 @@ export function LegalRecordingCollectionPreview(props: LegalRecordingCollectionP
             </Button>
           </div>
         </header>
+        {props.summaryError ? <p className="litrev-composer__error" role="alert">{props.summaryError}</p> : null}
         <div className="litrev-file-list legal-recording-library__list">
           {orderedItems.length ? orderedItems.map((item) => {
             const participants = recordingParticipantCount(item.state);
@@ -284,7 +288,7 @@ export function LegalRecordingCollectionPreview(props: LegalRecordingCollectionP
                   aria-label={t("legalDiagnosis.recording.library.openNamed", { name: item.label })}
                   onClick={() => props.onSelect(item.id)}
                 >
-                  <Play size={15} />
+                  {item.state.recording ? <Play size={15} /> : <FileText size={15} />}
                 </button>
                 {editingId === item.id ? (
                   <form className="legal-recording-library__rename" onSubmit={(event) => { event.preventDefault(); saveRename(); }}>
@@ -326,6 +330,20 @@ export function LegalRecordingCollectionPreview(props: LegalRecordingCollectionP
                       </span>
                     </button>
                     <span className="legal-recording-library__item-actions">
+                      {props.onSummarize ? (
+                        <button
+                          type="button"
+                          className="legal-recording-library__add-button legal-recording-library__summary-button"
+                          aria-label={t("legalDiagnosis.recording.library.summarizeNamed", { name: item.label })}
+                          title={t(!transcriptReady ? "legalDiagnosis.recording.library.summaryPending"
+                            : busy ? "legalDiagnosis.sources.finishRecordingFirst" : "legalDiagnosis.recording.library.summarizeHint")}
+                          disabled={!transcriptReady || busy || props.summaryDisabled}
+                          onClick={() => props.onSummarize?.(item)}
+                        >
+                          <Sparkles size={13} />
+                          <span>{t("legalDiagnosis.recording.library.summarize")}</span>
+                        </button>
+                      ) : null}
                       {props.onAddToConversation ? (
                         <button
                           type="button"

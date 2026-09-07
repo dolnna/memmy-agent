@@ -40,11 +40,13 @@ import {
   type LegalDiagWorkspaceState
 } from "./labor-diagnostic-workspace.js";
 import { LaborDiagnosticWorkflow, type LegalRecordingController } from "./labor-diagnostic-workflow.js";
+import { useRecordingSummary } from "./recording-summary.js";
 
 const LEGAL_PROJECT_TEXT_PREVIEW_PATTERN = /\.(?:c|cc|cpp|css|csv|go|h|hpp|html?|ini|java|js|json|jsx|log|md|mjs|py|rb|rs|sh|sql|tex|toml|ts|tsx|txt|xml|ya?ml)$/i;
 const LEGAL_PROJECT_TEXT_PREVIEW_MAX_CHARS = 512 * 1024;
 
 export function LaborDiagnosticPage() {
+  const recordingSummary = useRecordingSummary();
   const { language, t } = useTranslation();
   const { clients } = useApiClients();
   const { state: appState } = useAppState();
@@ -364,6 +366,7 @@ export function LaborDiagnosticPage() {
           setRecordingSurface("session");
           void recordingControllerRef.current?.start();
         }}
+        onUpload={(file) => void recordingControllerRef.current?.upload(file)}
         onSelect={(id) => {
           setSelectedRecordingId(id);
           setRecordingSurface("session");
@@ -378,13 +381,17 @@ export function LaborDiagnosticPage() {
           const file = recordingTranscriptSourceFile(item);
           if (file) recordingControllerRef.current?.addConversationFile(file);
         }}
+        onSummarize={(item) => void recordingSummary.summarize(item)}
+        summaryDisabled={recordingSummary.preparing || recorder.isRecording || recorder.isStarting || recorder.isTranscribing
+          || composerRecorder.isRecording || composerRecorder.isStarting || composerRecorder.isTranscribing}
+        summaryError={recordingSummary.error}
         onBack={() => setRecordingSurface("list")}
         onPause={() => recordingControllerRef.current?.pause()}
         onResume={() => recordingControllerRef.current?.resume()}
         onFinish={() => void recordingControllerRef.current?.finish()}
       />
     );
-  }, [phase.kind, recordingId, recordingItems, recordingSurface, selectedRecording, t]);
+  }, [phase.kind, recordingId, recordingItems, recordingSurface, selectedRecording, t, recordingSummary, recorder, composerRecorder]);
 
   const title = phase.kind === "thinking" || phase.kind === "task"
     ? t("legalDiagnosis.title.execution")

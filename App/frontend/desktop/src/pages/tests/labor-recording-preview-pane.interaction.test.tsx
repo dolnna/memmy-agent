@@ -9,8 +9,10 @@ import {
   LegalRecordingPreviewPane,
   orderLegalRecordingItems,
   parseLegalTranscript,
+  recordingTranscriptSourceFile,
   type LegalRecordingPreviewState
 } from "../labor-recording-preview-pane.js";
+import { createLegalRecordingExample } from "./fixtures/recording-example.js";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -229,7 +231,7 @@ describe("LegalRecordingPreviewPane", () => {
       mode: "completed",
       elapsedSeconds: 76,
       transcript: FINAL_TRANSCRIPT,
-      transcriptSource: "mock",
+      transcriptSource: "asr",
       recording: {
         id: "recording-meta",
         blob: new Blob(["recording"], { type: "audio/mp4" }),
@@ -290,6 +292,83 @@ describe("LegalRecordingPreviewPane", () => {
     });
     await act(async () => input.closest("form")!.dispatchEvent(new SubmitEvent("submit", { bubbles: true, cancelable: true })));
     expect(onRename).toHaveBeenCalledWith("recording-meta", "上海工厂访谈");
+  });
+
+  it("summarizes the selected completed transcript and disables unfinished or empty recordings", async () => {
+    const example = createLegalRecordingExample();
+    const onSummarize = vi.fn();
+    const onSelect = vi.fn();
+    const items = [
+      example,
+      { ...example, id: "live", label: "实时录音", state: { ...example.state, mode: "recording" as const } },
+      { ...example, id: "empty", label: "未转写录音", state: { ...example.state, transcript: "" } }
+    ];
+    const renderList = (includeLive: boolean) => act(async () => {
+      root.render(
+        <I18nProvider language="zh-CN">
+          <LegalRecordingCollectionPreview
+            surface="list"
+            items={includeLive ? items : items.filter((item) => item.id !== "live")}
+            activeState={example.state}
+            activeLabel={example.label}
+            onStart={() => undefined}
+            onSelect={onSelect}
+            onSummarize={onSummarize}
+            onBack={() => undefined}
+            onPause={() => undefined}
+            onResume={() => undefined}
+            onFinish={() => undefined}
+          />
+        </I18nProvider>
+      );
+    });
+    await renderList(true);
+    const busyButtons = [...container.querySelectorAll<HTMLButtonElement>(".legal-recording-library__summary-button")];
+    expect(busyButtons.every((button) => button.disabled)).toBe(true);
+    await act(async () => busyButtons[0]!.click());
+    expect(onSummarize).not.toHaveBeenCalled();
+    await renderList(false);
+    const buttons = [...container.querySelectorAll<HTMLButtonElement>(".legal-recording-library__summary-button")];
+    expect(buttons.map((button) => button.disabled)).toEqual([false, true]);
+    expect(buttons[0]?.textContent).toBe("总结");
+    await act(async () => {
+      buttons.forEach((button) => button.click());
+    });
+    expect(onSummarize).toHaveBeenCalledExactlyOnceWith(example);
+    expect(onSelect).not.toHaveBeenCalled();
+
+    const file = recordingTranscriptSourceFile(example)!;
+    expect(file.name).toBe("示例·制造企业用工访谈-转写.txt");
+    expect(await file.text()).toContain("以下企业、人物和访谈内容均为虚构");
+    expect(await file.text()).toContain("发言人 3  12:20");
+    expect(recordingTranscriptSourceFile(items[1]!)).toBeNull();
+    expect(recordingTranscriptSourceFile(items[2]!)).toBeNull();
+  });
+
+  it("shows the supplied recording directly without an extra example action", async () => {
+    const example = createLegalRecordingExample();
+    const onStart = vi.fn();
+    await act(async () => {
+      root.render(
+        <I18nProvider language="zh-CN">
+          <LegalRecordingCollectionPreview
+            surface="list"
+            items={[example]}
+            activeState={example.state}
+            activeLabel={example.label}
+            onStart={onStart}
+            onSelect={() => undefined}
+            onBack={() => undefined}
+            onPause={() => undefined}
+            onResume={() => undefined}
+            onFinish={() => undefined}
+          />
+        </I18nProvider>
+      );
+    });
+    expect(container.textContent).toContain(example.label);
+    expect(container.textContent).not.toContain("示例录音");
+    expect(onStart).not.toHaveBeenCalled();
   });
 
   it("shows every recording in stable newest-first order", async () => {

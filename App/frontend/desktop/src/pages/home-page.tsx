@@ -37,6 +37,8 @@ import {
   agentAttachmentAccept,
   classifyAgentAttachmentFile,
   safeAgentAttachmentFilename,
+  agentAttachmentSourceKey,
+  hashAgentAttachmentFile,
   type AgentAttachmentClassification,
 } from "../lib/agent-attachment.js";
 import { encodeAgentImage, type AgentImageMime } from "../lib/agent-image-encode.js";
@@ -118,8 +120,10 @@ import {
   type LegalRecordingSurface,
   type LegalRecordingViewItem
 } from "./labor-recording-preview-pane.js";
+import { useRecordingSummary } from "./recording-summary.js";
 
 export { agentChatScopeKey, updateComposerDraftForScope };
+export { agentAttachmentSourceKey, hashAgentAttachmentFile };
 export { hydrateAgentThreadInBackground };
 export { isComposingKeyboardEvent } from "../utils/keyboard.js";
 export type { PendingAttachment, PendingAttachmentBase, PendingFileAttachment, PendingImage };
@@ -978,6 +982,7 @@ export async function submitAgentComposerMessage(input: SubmitAgentComposerMessa
  * @returns The chat home page node.
  */
 export function HomePage() {
+  const recordingSummary = useRecordingSummary();
   const { clients } = useApiClients();
   const { state, dispatch } = useAppState();
   const modelWorkspace = createModelWorkspace(state.modelConfig);
@@ -3058,6 +3063,9 @@ export function HomePage() {
           setTaskRecordingHistory((current) => current.map((item) => item.id === id ? { ...item, label: title } : item));
         }}
         onAddToConversation={addTaskRecordingToConversation}
+        onSummarize={(item) => void recordingSummary.summarize(item)}
+        summaryDisabled={recordingSummary.preparing || asrRecorder.isRecording || asrRecorder.isStarting || asrRecorder.isTranscribing}
+        summaryError={recordingSummary.error}
         onBack={() => setTaskRecordingSurface("list")}
         onPause={() => taskRecordingRecorder.pause()}
         onResume={() => taskRecordingRecorder.resume()}
@@ -4599,31 +4607,6 @@ export function dataTransferHasAttachmentFiles(source: AttachmentDropSource | nu
     return true;
   }
   return arrayLikeToArray<string>(source?.types).some((type) => type.toLowerCase() === "files");
-}
-
-export async function hashAgentAttachmentFile(file: File): Promise<string> {
-  if (!globalThis.crypto?.subtle) {
-    throw new Error("home.media.error.sendReadFailed");
-  }
-  try {
-    const buffer = await file.arrayBuffer();
-    const digest = await globalThis.crypto.subtle.digest("SHA-256", buffer);
-    return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
-  } catch {
-    throw new Error("home.media.error.sendReadFailed");
-  }
-}
-
-export function agentAttachmentSourceKey(file: Pick<File, "name" | "size" | "lastModified">, classification: AgentAttachmentClassification, sha256: string): string {
-  return JSON.stringify([
-    "content-metadata-v1",
-    classification.kind,
-    classification.mime,
-    file.name || "",
-    file.size,
-    Number.isFinite(file.lastModified) ? file.lastModified : 0,
-    sha256
-  ]);
 }
 
 export async function validateAgentMediaFiles(files: File[], t?: HomeTranslate, existingAttachments: readonly PendingAttachment[] = []): Promise<AgentMediaValidationResult> {

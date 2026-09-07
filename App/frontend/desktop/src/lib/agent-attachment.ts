@@ -3,6 +3,23 @@ import { agentImageAccept, agentImageExtensionForMime, isAgentImageMime, type Ag
 export const AGENT_ATTACHMENT_MAX_COUNT = 4;
 export const AGENT_FILE_TARGET_MAX_BYTES = 10 * 1024 * 1024;
 
+export async function hashAgentAttachmentFile(file: File): Promise<string> {
+  if (!globalThis.crypto?.subtle) throw new Error("home.media.error.sendReadFailed");
+  try {
+    const digest = await globalThis.crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+    return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  } catch {
+    throw new Error("home.media.error.sendReadFailed");
+  }
+}
+
+export function agentAttachmentSourceKey(file: Pick<File, "name" | "size" | "lastModified">, classification: AgentAttachmentClassification, sha256: string): string {
+  return JSON.stringify([
+    "content-metadata-v1", classification.kind, classification.mime, file.name || "", file.size,
+    Number.isFinite(file.lastModified) ? file.lastModified : 0, sha256
+  ]);
+}
+
 const AGENT_ATTACHMENT_UNSAFE_FILENAME_CHARS = /[<>:"\/\\|?*\x00-\x1F]/g;
 
 export const AGENT_DOCUMENT_MIME_BY_EXTENSION = {

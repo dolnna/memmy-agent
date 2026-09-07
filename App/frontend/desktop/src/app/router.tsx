@@ -62,6 +62,8 @@ import { StartupScreen } from "../pages/startup-screen.js";
 import { TokenDetailPage } from "../pages/token-detail-page.js";
 import { ToolsPage } from "../pages/tools-page.js";
 import { WelcomePage } from "../pages/welcome-page.js";
+import { RetainedRoute } from "../components/retained-route.js";
+import { readLegalDiagnosisProjectContext, readLegalDiagnosisPrompt, readLegalDiagnosisSourceInput } from "../pages/labor-diagnostic-model.js";
 
 function readWorkspaceGuidanceOverlay(storage: Storage | undefined): Extract<DeferredGuidanceStep, "product_tour" | "nickname"> | null {
   const step = readDeferredGuidanceStep(storage);
@@ -231,6 +233,17 @@ export function AppRouter(props: { onRetry: () => void }) {
 
   return (
     <>
+      {["/main", "/legal-diagnosis", "/tools", "/memory", "/memory-sources", "/settings", "/pet"].includes(state.navigation.currentPath) ? (
+        <RetainedRoute
+          key={JSON.stringify([
+            state.account.userId, state.bootstrap?.app.userMode,
+            ...(typeof window === "undefined" ? [] : [readLegalDiagnosisProjectContext(), readLegalDiagnosisPrompt(), readLegalDiagnosisSourceInput()])
+          ])}
+          active={state.navigation.currentPath === "/legal-diagnosis"}
+        >
+          <LaborDiagnosticPage />
+        </RetainedRoute>
+      ) : null}
       {renderRoute(state.navigation.currentPath)}
       {windowDragRegion}
       {workspaceGuidanceStep === "product_tour" && (
@@ -338,7 +351,7 @@ function renderRoute(path: AppRoutePath) {
     case "/settings":
       return <SettingsPage />;
     case "/legal-diagnosis":
-      return <LaborDiagnosticPage />;
+      return null;
     case "/pet":
       return <PetPage />;
     case "/main":

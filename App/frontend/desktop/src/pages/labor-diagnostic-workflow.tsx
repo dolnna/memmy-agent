@@ -7,6 +7,7 @@ import { Button } from "../components/button.js";
 import { FileTypeIcon } from "../components/file-type-icon.js";
 import { useTranslation } from "../i18n/use-translation.js";
 import { mergeVoiceTranscript, type AsrRecorder } from "./asr-recorder.js";
+import { AgentAttachmentCard, splitAgentAttachmentName } from "./agent-file-attachment-chip.js";
 import {
   AgentCommandPalette,
   filterSlashCommands,
@@ -151,10 +152,6 @@ export function LaborDiagnosticWorkflow(props: LaborDiagnosticWorkflowProps) {
   useEffect(() => {
     props.onSourcesChange?.(sourceItems);
   }, [props.onSourcesChange, sourceItems]);
-
-  useEffect(() => () => {
-    if (props.recordingControllerRef) props.recordingControllerRef.current = null;
-  }, [props.recordingControllerRef]);
 
   useEffect(() => {
     if (props.phase.kind !== "preparing") return;
@@ -493,8 +490,10 @@ export function LaborDiagnosticWorkflow(props: LaborDiagnosticWorkflowProps) {
     setActiveCard(null);
   }
 
-  if (props.recordingControllerRef) {
-    props.recordingControllerRef.current = {
+  useLayoutEffect(() => {
+    const controllerRef = props.recordingControllerRef;
+    if (!controllerRef) return;
+    controllerRef.current = {
       open: () => openCard("recording"),
       start: startRecording,
       pause: () => props.recorder.pause(),
@@ -506,7 +505,8 @@ export function LaborDiagnosticWorkflow(props: LaborDiagnosticWorkflowProps) {
         window.requestAnimationFrame(() => composerInputRef.current?.focus());
       }
     };
-  }
+    return () => { controllerRef.current = null; };
+  });
 
   const launchInput = props.sourceInput?.trim()
     || `${LEGAL_DIAGNOSIS_COMMAND}  ${props.prompt}`.trim();
@@ -1030,17 +1030,16 @@ export function LaborDiagnosticWorkflow(props: LaborDiagnosticWorkflowProps) {
         {composerContextItems.length ? (
           <div className="legal-composer-contexts" aria-label={t("legalDiagnosis.composer.attachments")}>
             {composerContextItems.map((item) => (
-              <span key={item.id} className="legal-composer-context-chip" title={item.label}>
-                <FileTypeIcon name={item.label} surface="inline" />
-                <span>{item.label}</span>
-                <button
-                  type="button"
-                  aria-label={`${t("common.remove")}: ${item.label}`}
-                  onClick={() => removeSourceItem(item.id)}
-                >
-                  <X size={11} />
-                </button>
-              </span>
+              <AgentAttachmentCard
+                key={item.id}
+                kind="file"
+                name={item.label}
+                mime={item.file?.type}
+                subline={[splitAgentAttachmentName(item.label).extensionLabel, formatSourceSize(item.totalBytes)].filter(Boolean).join(" · ")}
+                removable
+                removeLabel={t("common.remove")}
+                onRemove={() => removeSourceItem(item.id)}
+              />
             ))}
           </div>
         ) : null}

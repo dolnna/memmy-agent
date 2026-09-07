@@ -30,7 +30,7 @@ import {
   parseAgentTurnSource,
   parseMemmyAgentModelSelection
 } from "../api/memmy-agent-client.js";
-import type { PendingAttachment } from "./agent-composer-state.js";
+import { agentChatScopeKey, type PendingAttachment } from "./agent-composer-state.js";
 import {
   mergeFileEdits,
   mergeToolProgressEvents,
@@ -288,6 +288,7 @@ export type AgentAction =
   | { type: "agent/historyHydrateLoaded"; thread: MemmyAgentWebuiThread; requestId: string }
   | { type: "agent/historyHydrateFailed"; chatId: string; requestId: string; error?: AgentOperationError }
   | { type: "agent/newChatRequested" }
+  | { type: "agent/newChatDraftPrepared"; content: string; attachments: PendingAttachment[]; target: WebuiSessionTarget }
   | { type: "agent/blankDraftReopened" }
   | { type: "agent/newChatCreated"; chatId: string }
   | { type: "agent/transientSendFailed"; chatId: string }
@@ -570,6 +571,16 @@ export function agentReducer(state: AgentState, action: AgentAction): AgentState
       return failHistoryHydrateLoad(state, action.chatId, action.requestId, action.error);
     case "agent/newChatRequested":
       return enterBlankDraft(state, state.newChatRequestId + 1);
+    case "agent/newChatDraftPrepared": {
+      const next = enterBlankDraft(state, state.newChatRequestId + 1);
+      const scopeKey = agentChatScopeKey(null, next.newChatRequestId);
+      return {
+        ...next,
+        composerDraftsByScope: { ...next.composerDraftsByScope, [scopeKey]: action.content },
+        composerPendingAttachmentsByScope: { ...next.composerPendingAttachmentsByScope, [scopeKey]: action.attachments },
+        draftTargetsByScope: { ...next.draftTargetsByScope, [scopeKey]: action.target }
+      };
+    }
     case "agent/blankDraftReopened":
       return enterBlankDraft(state, state.newChatRequestId);
     case "agent/newChatCreated":

@@ -11,6 +11,7 @@ import { FOCUSED_AGENT_CHAT_STORAGE_KEY } from "../../app/routes.js";
 import type { SlashCommandPaletteItem, SlashCommandStorageLike } from "../agent-command-palette.js";
 import { buildAgentDisplayUnits } from "../agent-thread-messages.js";
 import { recordingTranscriptSourceFile } from "../labor-recording-preview-pane.js";
+import { createLegalRecordingExample } from "./fixtures/recording-example.js";
 import {
   AGENT_RESTART_STATE_STORAGE_KEY,
   AGENT_MEDIA_ACCEPT,
@@ -92,7 +93,7 @@ describe("HomePage", () => {
 
   it("lets /legal-diagnosis send without an Agent websocket", () => {
     const source = readFileSync(homePageSourcePath, "utf8");
-    expect(source).toContain("const isLocalWorkflowCommand = /(?:^|\\s)\\/legal-diagnosis(?=\\s|$)/i.test(input);");
+    expect(source).toContain("const isLocalWorkflowCommand = isLegalDiagnosisCommand(input) || isLegalDiagnosisNaturalIntent(input);");
     expect(source).toContain("const composerSendDisabled = isLocalWorkflowCommand");
   });
 
@@ -1902,6 +1903,18 @@ describe("HomePage", () => {
       label: "未完成",
       state: { mode: "recording", elapsedSeconds: 3, transcript: "", transcriptSource: null }
     })).toBeNull();
+  });
+
+  it("stages the example transcript as a ready chat attachment and recognizes repeated summary clicks", async () => {
+    const example = createLegalRecordingExample();
+    const transcript = recordingTranscriptSourceFile(example)!;
+    const result = await validateAgentMediaFiles([transcript]);
+    const accepted = result.files[0]!;
+    const pending = fileToPendingAttachment(accepted.file, accepted.sourceKey, accepted.classification);
+    expect(pending).toMatchObject({ kind: "file", status: "ready", fileName: transcript.name });
+    const duplicate = await validateAgentMediaFiles([recordingTranscriptSourceFile(example)!], undefined, [pending]);
+    expect(duplicate).toMatchObject({ files: [], duplicateCount: 1 });
+    expect(await transcript.text()).toContain("POC 演示数据");
   });
 
   it("extracts only image files from pasted clipboard data", () => {
