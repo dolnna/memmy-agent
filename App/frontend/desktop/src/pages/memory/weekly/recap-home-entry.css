@@ -1,0 +1,21 @@
+.recap-home-entry { display: flex; justify-content: flex-start; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 14px; padding: 0 16px; color: var(--color-text-ink); font-size: 12px; line-height: 18px; }
+.recap-home-entry-label { display: inline-flex; align-items: center; gap: 7px; margin-right: 5px; color: color-mix(in srgb, var(--color-text-ink) 74%, transparent); font-weight: 500; white-space: nowrap; }
+.recap-home-entry-icon { display: grid; place-items: center; flex-shrink: 0; width: 24px; height: 24px; border-radius: 7px; background: color-mix(in srgb, var(--color-action-sky) 10%, var(--color-background-paper)); color: var(--color-action-sky-hover); }
+.recap-home-entry > button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 30px; padding: 5px 12px; border: 1px solid color-mix(in srgb, var(--color-text-ink) 12%, transparent); border-radius: 8px; color: color-mix(in srgb, var(--color-text-ink) 72%, transparent); background: var(--color-background-paper); font: inherit; cursor: pointer; transition: background-color .15s, border-color .15s, color .15s; }
+.recap-home-entry > button:hover, .recap-home-entry > button[aria-expanded="true"] { color: var(--color-action-sky-hover); border-color: color-mix(in srgb, var(--color-action-sky) 34%, transparent); background: color-mix(in srgb, var(--color-action-sky) 5%, var(--color-background-paper)); }
+.recap-home-entry > button:disabled { cursor: default; opacity: .4; }
+.recap-home-entry button:focus-visible, .recap-home-custom button:focus-visible { outline: 2px solid color-mix(in srgb, var(--color-action-sky) 50%, transparent); outline-offset: 2px; }
+.recap-home-entry-error { margin: 6px 0; color: #b34f38; font-size: 11px; }
+.recap-home-custom { position: fixed; z-index: 200; width: min(300px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); overflow: auto; padding: 16px; color: var(--color-text-ink); background: var(--color-background-paper); border: 1px solid color-mix(in srgb, var(--color-border-stone) 64%, transparent); border-radius: 12px; box-shadow: 0 10px 32px #29251f1a; font-size: 12px; }
+.recap-home-custom header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.recap-home-custom h2 { margin: 0; font-size: 13px; font-weight: 550; }
+.recap-home-custom header button { display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 5px; color: inherit; background: none; cursor: pointer; }
+.recap-home-custom header button:hover { background: var(--color-canvas-oat); }
+.recap-home-custom input { width: 100%; padding: 9px; border: 1px solid var(--color-border-stone); border-radius: 7px; color: inherit; background: transparent; font: inherit; outline: none; }
+.recap-home-custom input:focus { border-color: color-mix(in srgb, var(--color-action-sky) 55%, transparent); }
+.recap-home-date { display: flex; align-items: center; gap: 5px; margin: 9px 0 13px; min-height: 16px; color: color-mix(in srgb, var(--color-text-ink) 52%, transparent); font-size: 10px; }
+.recap-home-date svg { flex-shrink: 0; }
+.recap-home-date.recap-home-entry-error { color: #b34f38; }
+.recap-home-prepare { display: flex; justify-content: center; align-items: center; gap: 7px; width: 100%; padding: 8px; border: 0; border-radius: 7px; background: var(--color-text-ink); color: var(--color-background-paper); font: inherit; cursor: pointer; }
+.recap-home-prepare:disabled { opacity: .4; cursor: default; }
+.recap-home-custom-note { margin: 9px 0 0; color: color-mix(in srgb, var(--color-text-ink) 46%, transparent); font-size: 10px; line-height: 1.6; }

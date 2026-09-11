@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "npm run build -w @memmy/desktop-interface && tsc -p tsconfig.json --noEmit && vite build",
     "typecheck": "npm run build -w @memmy/desktop-interface && tsc -p tsconfig.json --noEmit",
-    "test": "npm run build -w @memmy/desktop-interface && vitest run"
+    "test": "npm run build -w @memmy/desktop-interface && vitest run",
+    "preview:weekly": "node scripts/preview-weekly.mjs"
   },
   "dependencies": {
     "@memmy/desktop-interface": "0.0.0",

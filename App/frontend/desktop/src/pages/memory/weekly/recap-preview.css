@@ -1,0 +1,4 @@
+.recap-preview-error { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 150; max-width: min(460px, calc(100vw - 32px)); padding: 12px 18px; background: var(--color-background-paper); color: var(--color-text-ink); border: 1px solid var(--color-border-stone); border-radius: 10px; box-shadow: 0 5px 24px #29251f1a; font-size: 12px; }
+.recap-preview-error button { margin-left: 14px; text-decoration: underline; }
+.recap-preview-label { position: fixed; right: 18px; bottom: 8px; z-index: 40; display: flex; flex-direction: column; align-items: flex-end; gap: 1px; pointer-events: none; color: color-mix(in srgb, var(--color-text-ink) 48%, transparent); font-size: 10px; line-height: 1.5; }
+.recap-preview-prepared { margin: 6px 0 0; color: color-mix(in srgb, var(--color-text-ink) 48%, transparent); font-size: 10px; line-height: 1.6; text-align: center; }

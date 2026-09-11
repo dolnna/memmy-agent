@@ -1,4 +1,4 @@
-import { StrictMode, useState } from "react";
+import { lazy, StrictMode, Suspense, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./app.js";
 import { AppProviders } from "./app/providers.js";
@@ -19,8 +19,6 @@ if (typeof window !== "undefined" && window.memmy) {
 
 applyWindowPlatformClass(window.memmy?.platform);
 
-initGtag();
-
 function readDevPreviewMode(): string | null {
   if (!import.meta.env.DEV || typeof window === "undefined") {
     return null;
@@ -40,6 +38,16 @@ function readDevPreviewMode(): string | null {
 
   return null;
 }
+
+const previewMode = readDevPreviewMode();
+
+if (previewMode !== "memory-weekly") {
+  initGtag();
+}
+
+const WeeklyReportPreview = import.meta.env.DEV
+  ? lazy(() => import("./pages/memory/weekly/weekly-preview.js").then((module) => ({ default: module.WeeklyReportPreview })))
+  : null;
 
 function NicknameModalPreview() {
   const [nickname, setNickname] = useState(() => randomNickname("zh-CN"));
@@ -79,8 +87,6 @@ if (!root) {
   throw new Error("Missing root element");
 }
 
-const previewMode = readDevPreviewMode();
-
 createRoot(root).render(
   <StrictMode>
     {previewMode === "startup" ? (
@@ -95,6 +101,10 @@ createRoot(root).render(
       <MemoryPluginConflictModalPreview />
     ) : previewMode === "memory-skills" ? (
       <MemorySkillsPreview />
+    ) : previewMode === "memory-weekly" && WeeklyReportPreview ? (
+      <Suspense fallback={<main className="flex min-h-screen items-center justify-center bg-canvas-oat text-text-ink/60">正在打开记忆周报…</main>}>
+        <WeeklyReportPreview />
+      </Suspense>
     ) : (
       <App />
     )}
