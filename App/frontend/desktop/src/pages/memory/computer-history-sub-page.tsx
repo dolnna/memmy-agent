@@ -9,9 +9,12 @@ import type {
 import { useTranslation } from "../../i18n/use-translation.js";
 import { MemoryMarkdown } from "./memory-markdown.js";
 import { AppIcon } from "./app-icon.js";
+import { ProactiveRemindersSection } from "../../components/proactive-reminders.js";
+import { ComputerHistoryIntroduction, markComputerHistoryIntroduced, shouldIntroduceComputerHistory } from "./computer-history-introduction.js";
 
 export interface ComputerHistorySubPageProps {
   client: MemmyAgentClient | null;
+  onAskActivity?(): void;
 }
 
 interface HistoryDay {
@@ -147,6 +150,7 @@ export function ComputerHistorySubPage(props: ComputerHistorySubPageProps) {
   const [clearMenuOpen, setClearMenuOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [introductionOpen, setIntroductionOpen] = useState(shouldIntroduceComputerHistory);
   const clearMenuRef = useRef<HTMLDivElement | null>(null);
 
   const refresh = useCallback(async () => {
@@ -244,15 +248,17 @@ export function ComputerHistorySubPage(props: ComputerHistorySubPageProps) {
       <header className="ch__head">
         <h1>
           Computer History
-          <span
-            className="ch__info"
-            title={t("computerHistory.info")}
-            aria-hidden
+          <button type="button"
+            className="ch__info ch__info--button"
+            title={t("historyIntro.open")}
+            aria-label={t("historyIntro.open")}
+            onClick={() => setIntroductionOpen(true)}
           >
             i
-          </span>
+          </button>
         </h1>
         <div className="ch__head-actions">
+          {props.onAskActivity ? <button type="button" className="ch__button" onClick={props.onAskActivity}>{t("historyIntro.askActivity")}</button> : null}
           {/* Codex records all day and so has no switch. Memmy only records
               when asked, which is the whole privacy story, so the control
               belongs where the eye already goes for actions. */}
@@ -306,14 +312,13 @@ export function ComputerHistorySubPage(props: ComputerHistorySubPageProps) {
               </div>
             ) : null}
           </div>
-          <button type="button" className="ch__button ch__button--ask" disabled title={t("computerHistory.askSoon")}>
-            <span className="ch__ask-glyph" aria-hidden>◌</span>
-            {t("computerHistory.ask")}
-          </button>
         </div>
       </header>
 
       {error ? <div className="ch__error">{error}</div> : null}
+      {snapshot?.observation.error ? <div className="ch__error" role="status">{snapshot.observation.error}</div> : null}
+
+      <ProactiveRemindersSection />
 
       <div className="ch__feed">
         {days.length ? days.map((day) => {
@@ -393,6 +398,11 @@ export function ComputerHistorySubPage(props: ComputerHistorySubPageProps) {
       </div>
 
       <WorkflowSection snapshot={snapshot} />
+      {introductionOpen && props.client ? <ComputerHistoryIntroduction
+        client={props.client}
+        onClose={() => { markComputerHistoryIntroduced(); setIntroductionOpen(false); }}
+        onApplied={(next) => { setSnapshot(next); markComputerHistoryIntroduced(); setIntroductionOpen(false); }}
+      /> : null}
     </section>
   );
 }

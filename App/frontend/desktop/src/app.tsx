@@ -16,6 +16,7 @@ import { AppRouter } from "./app/router.js";
 import { UpdateCoordinatorProvider } from "./app/update-coordinator.js";
 import { GithubStarPromptHost } from "./components/github-star-prompt-host.js";
 import { InviteResultToast } from "./components/invite-result-toast.js";
+import { ProactiveRemindersProvider } from "./components/proactive-reminders.js";
 import {
   FOCUSED_AGENT_CHAT_STORAGE_KEY,
   readGuidanceCompleted,
@@ -310,6 +311,7 @@ function RuntimeApp() {
 
   return (
     <UpdateCoordinatorProvider>
+      <ProactiveRemindersProvider client={state.navigation.currentPath === "/pet" || readLaunchModeOverride(window.location.search) === "pet" ? null : clients?.memmyAgent ?? null}>
       <AgentRuntimeBridge taskStateCoordinator={taskStateCoordinator ?? undefined}>
         <AppRouter onRetry={retry} />
         <GithubStarPromptHost />
@@ -338,6 +340,7 @@ function RuntimeApp() {
           />
         ) : null}
       </AgentRuntimeBridge>
+      </ProactiveRemindersProvider>
     </UpdateCoordinatorProvider>
   );
 }

@@ -54,6 +54,10 @@ declare global {
       selectProjectDirectory(): Promise<DesktopProjectDirectorySelection>;
       selectEmptyProjectDirectory(): Promise<DesktopProjectDirectorySelection>;
       notifyTaskDone(payload: { title: string; body: string; silent: boolean }): Promise<void>;
+      createMacReminder(input: { requestId: string; title: string; notes?: string; dueAt?: string }): Promise<{ id: string; title: string; listName: string; alreadyExists?: boolean }>;
+      openMacReminders(): Promise<void>;
+      notifyProactiveReminder(payload: { id: string; title: string; body: string }): Promise<boolean>;
+      onProactiveReminderOpen(callback: (id: string) => void): () => void;
       notifyUpdateAvailable(payload: { title: string; body: string; silent: boolean }): Promise<void>;
       setPetWindow(enabled: boolean, target?: { route?: string; hash?: string; agentChatId?: string; petIntent?: "user" }): Promise<void>;
       hidePetWindow(): Promise<void>;

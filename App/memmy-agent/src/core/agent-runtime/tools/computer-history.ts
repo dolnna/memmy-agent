@@ -34,6 +34,9 @@ const PARAMETERS = {
 // job, and keeping the two apart stops a retrieval result from turning into
 // desktop control on its own.
 const DESCRIPTION = [
+  "Use ONLY to answer questions about the user's own recorded computer activity.",
+  "First read the computer-history SKILL.md listed in your Skills catalog, then call computer_history_status to check coverage.",
+  "Do not use for developing/explaining this feature, source-code discovery, Git history, or database history.",
   "Locate windows in the local Computer History by relevance to a question.",
   "This searches the readable summaries only, which say what the user was doing but not the specifics.",
   "For who contacted them, what a message said, or which page they were on, read event_stream_path",

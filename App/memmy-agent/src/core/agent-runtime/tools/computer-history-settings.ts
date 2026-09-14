@@ -42,10 +42,13 @@ export class ComputerHistoryStatusTool extends Tool {
 
   get description(): string {
     return [
+      "Use ONLY for questions about the user's own recorded desktop activity, after reading the computer-history SKILL.md listed in your Skills catalog.",
+      "If the skill is not already loaded, your first action is read_file on that SKILL.md; call this status tool afterwards.",
+      "Do NOT call this to develop, debug or explain the Computer History feature, to find its source code, or to inspect Git/database history.",
       "Report whether Computer History is recording, and where its data lives.",
       "Returns two paths: summary_directory holds the readable per-window summaries, and event_stream_root_path holds the raw per-segment event streams.",
       "Read both with your own file tools; the summaries locate a window, the raw stream answers what specifically happened in it.",
-      "Call this before relying on Computer History data.",
+      "After loading the skill, call this before relying on Computer History data.",
       "If it is stopped and the user expects fresh data, offer to start it; if paused, offer to resume it.",
     ].join(" ");
   }
@@ -56,10 +59,14 @@ export class ComputerHistoryStatusTool extends Tool {
     const snapshot = this.service.snapshot();
     return JSON.stringify({
       status: "ok",
+      current_time: new Date().toISOString(),
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       state: runStateFrom(snapshot.observation.state),
+      recorder_ready: snapshot.observation.recorderReady ?? false,
       started_at: snapshot.observation.startedAt,
       segment_id: snapshot.observation.segmentId,
       error: snapshot.observation.error,
+      narration_error: snapshot.observation.narrationError,
       // Two different things: the summaries answer "what was I doing", the raw
       // streams answer "who said what". Report both so the agent can pick.
       summary_directory: snapshot.privacy.markdownDirectory,

@@ -27,6 +27,7 @@ describe("ComputerHistorySubPage", () => {
   let root: Root;
 
   beforeEach(() => {
+    window.localStorage.setItem("memmy.computerHistoryIntroduction.v1", "seen");
     container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);

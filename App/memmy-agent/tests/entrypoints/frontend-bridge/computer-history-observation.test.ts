@@ -1,7 +1,9 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ComputerHistoryApiError,
   ComputerHistoryDemoService,
@@ -11,28 +13,68 @@ import { ObservationSettingsStore } from "../../../src/core/agent-runtime/comput
 
 const roots: string[] = [];
 const settingsFiles: string[] = [];
+const instances: ComputerHistoryDemoService[] = [];
+const recorderProcesses = vi.hoisted(() => ({ spawn: vi.fn() }));
+vi.mock("node:child_process", async (importOriginal) => ({
+  ...await importOriginal<typeof import("node:child_process")>(),
+  spawn: recorderProcesses.spawn,
+}));
+
+type FakeRecorder = EventEmitter & { stdout: PassThrough; stderr: PassThrough; stdin: PassThrough; kill: ReturnType<typeof vi.fn> };
+const children: FakeRecorder[] = [];
+
+beforeEach(() => {
+  recorderProcesses.spawn.mockReset();
+  recorderProcesses.spawn.mockImplementation(() => {
+    const child = Object.assign(new EventEmitter(), {
+      stdout: new PassThrough(), stderr: new PassThrough(), stdin: new PassThrough(),
+      kill: vi.fn(),
+    });
+    child.kill.mockImplementation(() => {
+      queueMicrotask(() => child.emit("exit", 0, "SIGTERM"));
+      return true;
+    });
+    children.push(child);
+    return child;
+  });
+});
 
 function service(): ComputerHistoryDemoService {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "memmy-observation-"));
   roots.push(root);
   const settingsFile = path.join(root, "observation-settings.json");
   settingsFiles.push(settingsFile);
-  return new ComputerHistoryDemoService({
+  const instance = new ComputerHistoryDemoService({
     observationSettingsFile: settingsFile,
     historyDirectory: path.join(root, "histories"),
     recordingDirectory: path.join(root, "recordings"),
     workflowDirectory: path.join(root, "workflows"),
   });
+  instances.push(instance);
+  return instance;
 }
 
-afterEach(() => {
+afterEach(async () => {
+  await Promise.all(instances.splice(0).map((instance) => instance.shutdown()));
+  children.splice(0);
+  settingsFiles.splice(0);
   while (roots.length) fs.rmSync(roots.pop()!, { recursive: true, force: true });
 });
+
+function readySignal(instance: ComputerHistoryDemoService, overrides: Record<string, unknown> = {}): string {
+  const snapshot = instance.snapshot();
+  return `${JSON.stringify({
+    type: "computer_history_recorder_ready", version: 1, recordingId: "human:fixture",
+    eventsFile: path.join(snapshot.privacy.eventStreamDirectory, snapshot.observation.segmentId!, "events.jsonl"),
+    ...overrides,
+  })}\n`;
+}
 
 describe("Computer History observation lifecycle", () => {
   it("starts stopped, so a fresh install records nothing", () => {
     expect(service().snapshot().observation).toMatchObject({
       state: "stopped",
+      recorderReady: false,
       startedAt: null,
       segmentId: null,
     });
@@ -43,6 +85,7 @@ describe("Computer History observation lifecycle", () => {
     const snapshot = instance.startObservation();
 
     expect(snapshot.observation.state).toBe("running");
+    expect(snapshot.observation.recorderReady).toBe(false);
     // Segment ids align to the ten-minute grid so they sort and group cleanly.
     expect(snapshot.observation.segmentId).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}-[0-5]0-00Z$/);
     await instance.stopObservation();
@@ -134,6 +177,97 @@ describe("Computer History observation lifecycle", () => {
     expect(instance.snapshot().observation.state).toBe("stopped");
     // Shutting down twice must stay quiet rather than throwing on app exit.
     await expect(instance.shutdown()).resolves.toBeUndefined();
+  });
+});
+
+describe("native recorder readiness", () => {
+  it("waits for the current helper acknowledgement, not a progress log or stale event file", () => {
+    const instance = service();
+    const started = instance.startObservation();
+    const child = children.at(-1)!;
+    fs.writeFileSync(path.join(started.privacy.eventStreamDirectory, started.observation.segmentId!, "events.jsonl"),
+      JSON.stringify({ eventType: "recording_started", timestamp: new Date(Date.now() - 60_000).toISOString() }) + "\n");
+    child.stdout.write("[recorder] recording now; keep the final result visible\n");
+    child.stderr.write(readySignal(instance));
+    child.stdout.write(readySignal(instance, { eventsFile: "/tmp/other-recorder/events.jsonl" }));
+    child.stdout.write(readySignal(instance, { version: 2 }));
+    child.stdout.write("not json\n");
+    expect(instance.snapshot().observation.recorderReady).toBe(false);
+    child.stdout.write(readySignal(instance));
+    expect(instance.snapshot().observation.recorderReady).toBe(true);
+  });
+
+  it("handles acknowledgements split across chunks including UTF-8 boundaries", () => {
+    const instance = service();
+    instance.startObservation();
+    const child = children.at(-1)!;
+    const signal = Buffer.from(readySignal(instance, { recordingId: "human:已就绪" }));
+    const split = signal.indexOf(Buffer.from("已")) + 1;
+    child.stdout.write(signal.subarray(0, split));
+    expect(instance.snapshot().observation.recorderReady).toBe(false);
+    child.stdout.write(signal.subarray(split, signal.length - 1));
+    expect(instance.snapshot().observation.recorderReady).toBe(false);
+    child.stdout.write(signal.subarray(signal.length - 1));
+    expect(instance.snapshot().observation.recorderReady).toBe(true);
+  });
+
+  it("clears readiness immediately on pause/stop and rejects acknowledgements from replaced children", async () => {
+    const instance = service();
+    instance.startObservation();
+    const first = children.at(-1)!;
+    const firstSignal = readySignal(instance);
+    first.stdout.write(firstSignal);
+    expect(instance.snapshot().observation.recorderReady).toBe(true);
+    const pausing = instance.pauseObservation();
+    expect(instance.snapshot().observation.recorderReady).toBe(false);
+    first.stdout.write(firstSignal);
+    await pausing;
+    const resumed = instance.resumeObservation();
+    expect(resumed.observation.recorderReady).toBe(false);
+    first.stdout.write(firstSignal);
+    expect(instance.snapshot().observation.recorderReady).toBe(false);
+    const second = children.at(-1)!;
+    second.stdout.write(readySignal(instance));
+    expect(instance.snapshot().observation.recorderReady).toBe(true);
+    const stopping = instance.stopObservation();
+    expect(instance.snapshot().observation.recorderReady).toBe(false);
+    second.stdout.write(firstSignal);
+    await stopping;
+    expect(instance.snapshot().observation).toMatchObject({ state: "stopped", recorderReady: false });
+  });
+
+  it("requires a new helper acknowledgement after rotation", async () => {
+    const instance = service();
+    instance.startObservation();
+    const first = children.at(-1)!;
+    const firstSignal = readySignal(instance);
+    first.stdout.write(firstSignal);
+    (instance as any).rotateSegment();
+    expect(instance.snapshot().observation.recorderReady).toBe(false);
+    await vi.waitFor(() => expect(children).toHaveLength(2));
+    first.stdout.write(firstSignal);
+    expect(instance.snapshot().observation.recorderReady).toBe(false);
+    children.at(-1)!.stdout.write(readySignal(instance));
+    expect(instance.snapshot().observation.recorderReady).toBe(true);
+  });
+
+  it("reports native startup and later process failures without retaining readiness", async () => {
+    const instance = service();
+    instance.startObservation();
+    const first = children.at(-1)!;
+    first.stderr.write("missing macOS permission: Accessibility\n");
+    first.emit("exit", 1, null);
+    expect(instance.snapshot().observation).toMatchObject({
+      state: "failed", recorderReady: false, error: expect.stringContaining("Accessibility"),
+    });
+    const started = instance.startObservation();
+    expect(started.observation.recorderReady).toBe(false);
+    const second = children.at(-1)!;
+    second.stdout.write(readySignal(instance));
+    expect(instance.snapshot().observation.recorderReady).toBe(true);
+    second.emit("error", new Error("native helper disconnected"));
+    second.stdout.write(readySignal(instance));
+    expect(instance.snapshot().observation).toMatchObject({ state: "failed", recorderReady: false });
   });
 });
 

@@ -5,7 +5,8 @@ records general tool contracts and less obvious usage patterns.
 
 ## General Tool Contract
 
-- Use the narrowest structured tool that directly matches the task.
+- Load an applicable skill before choosing its operational tools, unless the skill is already loaded. A narrow structured tool does not replace its skill's prerequisites.
+- Use the narrowest structured tool that directly matches the task, after loading any applicable skill.
 - When state is uncertain, perform only enough read-only discovery to identify the cause, the smallest relevant change, and a verification step.
 - Do not treat `exec` as a universal workaround for files, search, web, messages, or scheduling.
 - If a tool fails, read the error, refresh the relevant state, and retry with a different method instead of repeating the same call.

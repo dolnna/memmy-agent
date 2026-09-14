@@ -435,6 +435,17 @@ export async function run(argv = process.argv) {
         application,
         details: { goal: args.title ?? "Human-operated macOS workflow" },
       }, true);
+      // Swift emits session.started only after installing and enabling its
+      // event tap. The earlier "recording now" progress log is not readiness:
+      // native permission or process errors can still occur during startup.
+      if (!stopping) {
+        process.stdout.write(`${JSON.stringify({
+          type: "computer_history_recorder_ready",
+          version: 1,
+          recordingId,
+          eventsFile: output,
+        })}\n`);
+      }
       return;
     }
     if (event.kind === "session.ended") return;

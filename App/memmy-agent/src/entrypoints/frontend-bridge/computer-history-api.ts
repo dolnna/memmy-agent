@@ -3,6 +3,7 @@ import {
 } from "../../core/agent-runtime/computer-history/settings-store.js";
 import {
   DEFAULT_OBSERVATION_SETTINGS,
+  evaluateObservation,
   parseObservationSettings,
 } from "../../core/agent-runtime/computer-history/observation-settings.js";
 import {
@@ -24,8 +25,11 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import { fileURLToPath } from "node:url";
 import { ApplicationIconReader } from "../../core/agent-runtime/computer-history/application-icon.js";
+import { buildProactiveEvidence } from "../../core/agent-runtime/computer-history/proactive-evidence.js";
+import { ProactiveReminders, ProactiveActionError, type ProactiveSnapshot } from "../../core/agent-runtime/computer-history/proactive-reminders.js";
 
 export type ComputerHistorySourceType = "captured" | "rollup" | "imported" | "demo_fixture";
 
@@ -69,6 +73,8 @@ export interface ComputerHistoryWorkflow {
 export interface ComputerHistorySnapshot {
   observation: {
     state: ObservationState;
+    /** True only after the current native recorder acknowledges its event tap is running. */
+    recorderReady: boolean;
     startedAt: string | null;
     segmentId: string | null;
     segmentStartedAt: string | null;
@@ -239,6 +245,25 @@ function boundedInterval(value: string | undefined, fallback: number, minimum: n
   return Math.max(minimum, Math.min(maximum, Math.floor(parsed)));
 }
 
+/** Keep each live inference bounded even during a busy ten-minute segment. */
+function readEventTail(file: string): string[] {
+  let descriptor: number | null = null;
+  try {
+    descriptor = fs.openSync(file, "r");
+    const size = fs.fstatSync(descriptor).size;
+    const start = Math.max(0, size - 256 * 1024);
+    const buffer = Buffer.alloc(size - start);
+    fs.readSync(descriptor, buffer, 0, buffer.length, start);
+    const lines = buffer.toString("utf8").split("\n");
+    if (start > 0) lines.shift();
+    return lines;
+  } catch {
+    return [];
+  } finally {
+    if (descriptor !== null) fs.closeSync(descriptor);
+  }
+}
+
 export class ComputerHistoryDemoService {
   private readonly repositoryRoot: string;
   private readonly historyDirectory: string;
@@ -247,12 +272,15 @@ export class ComputerHistoryDemoService {
   private readonly liveSummaryIntervalMs: number;
   private segment: SegmentState | null = null;
   private observationState: ObservationState = "stopped";
+  private recorderReady = false;
   private observationStartedAt: string | null = null;
   private observationError: string | null = null;
   private rotationTimer: ReturnType<typeof setInterval> | null = null;
   private readonly observationSettings: ObservationSettingsStore;
   private readonly applicationIcons: ApplicationIconReader;
   private llmRuntime: LLMRuntimeResolver | null = null;
+  private readonly proactive: ProactiveReminders;
+  private lastProactiveSignature: string | null = null;
   /**
    * The one backfill this process runs. Held rather than flagged so that
    * starting it and waiting for it are the same call: what succeeds is written
@@ -284,6 +312,7 @@ export class ComputerHistoryDemoService {
     recordingDirectory?: string;
     workflowDirectory?: string;
     observationSettingsFile?: string;
+    proactiveSettingsFile?: string;
   } = {}) {
     this.repositoryRoot = path.resolve(input.repositoryRoot ?? defaultRepositoryRoot());
     this.historyDirectory = path.resolve(input.historyDirectory
@@ -293,13 +322,36 @@ export class ComputerHistoryDemoService {
     this.workflowDirectory = path.resolve(input.workflowDirectory
       ?? path.join(os.homedir(), ".memmy", "computer-history", "workflows"));
     this.observationSettings = new ObservationSettingsStore(input.observationSettingsFile);
+    this.proactive = new ProactiveReminders(input.proactiveSettingsFile
+      ?? path.join(path.dirname(this.historyDirectory), "proactive-reminders.json"));
     this.applicationIcons = new ApplicationIconReader({ repositoryRoot: this.repositoryRoot });
     this.liveSummaryIntervalMs = boundedInterval(
       process.env.MEMMY_COMPUTER_HISTORY_LIVE_SUMMARY_INTERVAL_MS,
-      60_000,
+      30_000,
       15_000,
       10 * 60_000,
     );
+  }
+
+  proactiveSnapshot(): ProactiveSnapshot {
+    return this.proactive.snapshot(this.observationState);
+  }
+
+  setProactiveEnabled(enabled: unknown): ProactiveSnapshot {
+    if (typeof enabled !== "boolean") throw new ComputerHistoryApiError(400, "enabled must be a boolean");
+    this.proactive.setEnabled(enabled);
+    this.lastProactiveSignature = null;
+    return this.proactiveSnapshot();
+  }
+
+  proactiveAction(input: { id: string; action: string; reminder_id?: unknown; title?: unknown; due_at?: unknown }): ProactiveSnapshot {
+    try {
+      this.proactive.action(input, this.observationState);
+      return this.proactiveSnapshot();
+    } catch (error) {
+      if (error instanceof ProactiveActionError) throw new ComputerHistoryApiError(error.status, error.message);
+      throw error;
+    }
   }
 
   /**
@@ -376,6 +428,7 @@ export class ComputerHistoryDemoService {
     return {
       observation: {
         state: this.observationState,
+        recorderReady: this.observationState === "running" && this.recorderReady,
         startedAt: this.observationStartedAt,
         segmentId: this.segment?.id ?? null,
         segmentStartedAt: this.segment?.startedAt ?? null,
@@ -487,6 +540,7 @@ export class ComputerHistoryDemoService {
   }
 
   private spawnRecorder(segment: SegmentState): void {
+    this.recorderReady = false;
     const recorder = path.join(this.repositoryRoot, "workflows", "scripts", "record-human-history.mjs");
     if (!fs.existsSync(recorder)) throw new ComputerHistoryApiError(503, "recorder script is unavailable");
     const child = spawn(process.execPath, [
@@ -509,7 +563,31 @@ export class ComputerHistoryDemoService {
       if (this.segment?.child !== child) return;
       this.segment.output = appendLog(this.segment.output, chunk.toString("utf8"));
     };
-    child.stdout.on("data", append);
+    const decoder = new StringDecoder("utf8");
+    let stdoutLine = "";
+    child.stdout.on("data", (chunk: Buffer) => {
+      if (this.segment?.child !== child) return;
+      append(chunk);
+      stdoutLine += decoder.write(chunk);
+      let boundary = stdoutLine.indexOf("\n");
+      while (boundary >= 0) {
+        const line = stdoutLine.slice(0, boundary);
+        stdoutLine = stdoutLine.slice(boundary + 1);
+        try {
+          const signal = JSON.parse(line);
+          // This acknowledgement follows Swift's session.started event. Logs,
+          // prior events.jsonl contents and other children cannot make us ready.
+          if (this.observationState === "running" && signal?.type === "computer_history_recorder_ready"
+            && signal.version === 1 && signal.eventsFile === segment.eventsFile
+            && typeof signal.recordingId === "string" && signal.recordingId.startsWith("human:")) {
+            this.recorderReady = true;
+          }
+        } catch { /* Ordinary recorder progress lines are not protocol messages. */ }
+        boundary = stdoutLine.indexOf("\n");
+      }
+      // A malformed progress line must not grow an unbounded buffer.
+      if (stdoutLine.length > MAX_LOG_CHARS) stdoutLine = "";
+    });
     child.stderr.on("data", append);
     child.once("error", (error) => {
       if (this.segment?.child !== child) return;
@@ -525,6 +603,7 @@ export class ComputerHistoryDemoService {
   }
 
   private failObservation(message: string): void {
+    this.recorderReady = false;
     this.clearLiveSummaryTimer();
     this.clearRotationTimer();
     if (this.segment) this.segment.child = null;
@@ -546,6 +625,7 @@ export class ComputerHistoryDemoService {
   }
 
   private async detachRecorder(segment: SegmentState): Promise<void> {
+    if (this.segment === segment) this.recorderReady = false;
     const child = segment.child;
     if (!child) return;
     segment.child = null;
@@ -703,6 +783,7 @@ export class ComputerHistoryDemoService {
     this.segment = segment;
     this.observationStartedAt ??= new Date().toISOString();
     this.observationError = null;
+    this.recorderReady = false;
     this.observationState = "running";
     try {
       this.spawnRecorder(segment);
@@ -787,6 +868,7 @@ export class ComputerHistoryDemoService {
       throw new ComputerHistoryApiError(409, "Computer History is not running");
     }
     const segment = this.segment;
+    this.recorderReady = false;
     this.observationState = "stopping";
     this.clearLiveSummaryTimer();
     this.clearRotationTimer();
@@ -829,6 +911,10 @@ export class ComputerHistoryDemoService {
 
   private writeLiveSummary(segment: SegmentState): void {
     if (!fs.existsSync(segment.eventsFile)) return;
+    if (this.proactive.enabled) {
+      void this.analyzeLiveSegment(segment);
+      return;
+    }
     // Leave a written summary alone for the rest of the segment. The mechanical
     // pass rewrites the whole file, so running it again would put the
     // placeholder back over the account; and because narration runs once per
@@ -854,6 +940,62 @@ export class ComputerHistoryDemoService {
     if (stat.size >= LIVE_NARRATION_MIN_BYTES && !this.narratedOpenSegments.has(segment.id)) {
       this.narratedOpenSegments.add(segment.id);
       this.narrateSummary(segment.historyFile, "10min", segment.eventsFile);
+    }
+  }
+
+  /** A single inference refreshes the activity account and judges whether a suggestion helps now. */
+  private async analyzeLiveSegment(segment: SegmentState): Promise<void> {
+    if (this.proactive.analyzing || this.observationState !== "running") return;
+    const runtime = this.llmRuntime;
+    if (!runtime) {
+      this.proactive.error = "请先配置一个可用模型，才能理解活动并提供主动建议。";
+      return;
+    }
+    const policy = this.observationSettings.read();
+    const lines = readEventTail(segment.eventsFile).filter((line) => {
+      try {
+        const event = JSON.parse(line);
+        return evaluateObservation(policy, {
+          bundleId: event.application?.bundleId,
+          url: event.window?.url ?? event.details?.url,
+          privateBrowsing: event.privateBrowsing === true || event.window?.privateBrowsing === true,
+        }).observe;
+      } catch { return false; }
+    });
+    const evidence = buildProactiveEvidence(lines);
+    if (!evidence.text || !evidence.eventIds.length || evidence.signature === this.lastProactiveSignature) return;
+    this.proactive.analyzing = true;
+    this.proactive.error = null;
+    try {
+      const narrative = await writeSegmentNarrative(runtime, {
+        applications: evidence.application ? [evidence.application] : [],
+        evidence: evidence.text,
+        window: "10min",
+        currentWindowSummary: isSummaryWritten(segment.historyFile)
+          ? fs.readFileSync(segment.historyFile, "utf8").replace(/^---\n[\s\S]*?\n---\n/u, "")
+          : undefined,
+        priorSummaries: this.priorSummaries(path.basename(segment.historyFile, ".md")),
+        proactiveContext: this.proactive.context(evidence),
+        onError: () => {
+          this.proactive.error = "这次活动分析未完成，下次有新活动时会重试。";
+        },
+      });
+      if (!narrative) return;
+      // Finishing an old or paused window must not introduce a new interruption.
+      if (this.observationState !== "running" || this.segment !== segment || !this.proactive.enabled) return;
+      this.lastProactiveSignature = evidence.signature;
+      this.proactive.accept(narrative.proactive, evidence);
+      if (!fs.existsSync(segment.historyFile)) {
+        const error = this.writeSegmentSummary(segment);
+        if (error) { this.narrationError = error; return; }
+      }
+      fs.writeFileSync(segment.historyFile,
+        applyNarrative(fs.readFileSync(segment.historyFile, "utf8"), narrative), "utf8");
+      this.narrationError = null;
+    } catch {
+      this.proactive.error = "暂时无法分析活动，稍后会自动重试。";
+    } finally {
+      this.proactive.analyzing = false;
     }
   }
 

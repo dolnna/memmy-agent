@@ -5,6 +5,28 @@ export {
 
 export type MicrophoneAccessStatus = "not-determined" | "granted" | "denied" | "restricted" | "unsupported";
 
+export interface DesktopMacReminderRequest {
+  /** Stable suggestion ID. Reusing it returns the existing reminder. */
+  requestId: string;
+  title: string;
+  notes?: string;
+  /** An explicit ISO date-time with timezone. Omit when no time was agreed. */
+  dueAt?: string;
+}
+
+export interface DesktopMacReminderResult {
+  id: string;
+  title: string;
+  listName: string;
+  alreadyExists?: boolean;
+}
+
+export interface DesktopProactiveReminderNotification {
+  id: string;
+  title: string;
+  body: string;
+}
+
 export interface DesktopMenuBarIconResult {
   enabled: boolean;
 }

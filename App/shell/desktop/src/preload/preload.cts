@@ -10,6 +10,9 @@ type DesktopImageActionRequest = import("@memmy/desktop-interface").DesktopImage
 type DesktopImageSaveResult = import("@memmy/desktop-interface").DesktopImageSaveResult;
 type DesktopMemoryServiceRestartResult = import("@memmy/desktop-interface").DesktopMemoryServiceRestartResult;
 type DesktopProjectDirectorySelection = import("@memmy/desktop-interface").DesktopProjectDirectorySelection;
+type DesktopMacReminderRequest = import("@memmy/desktop-interface").DesktopMacReminderRequest;
+type DesktopMacReminderResult = import("@memmy/desktop-interface").DesktopMacReminderResult;
+type DesktopProactiveReminderNotification = import("@memmy/desktop-interface").DesktopProactiveReminderNotification;
 type MicrophoneAccessStatus = import("@memmy/desktop-interface").MicrophoneAccessStatus;
 type MainWindowActionRequest = { id: string; action: "close" | "minimize" };
 
@@ -34,6 +37,10 @@ interface MemmyPreloadApi {
   openExternal(url: string): Promise<void>;
   openAgentTool(sourceId: string, prompt: string): Promise<{ opened: boolean }>;
   openMailto(mailtoUrl: string): Promise<void>;
+  createMacReminder(request: DesktopMacReminderRequest): Promise<DesktopMacReminderResult>;
+  openMacReminders(): Promise<void>;
+  notifyProactiveReminder(payload: DesktopProactiveReminderNotification): Promise<boolean>;
+  onProactiveReminderOpen(callback: (id: string) => void): () => void;
   copyImageToClipboard(request: DesktopImageActionRequest): Promise<void>;
   saveImage(request: DesktopImageActionRequest): Promise<DesktopImageSaveResult>;
   exportMemoryDatabase(): Promise<unknown>;
@@ -106,6 +113,17 @@ class MainWindowActionRequestBuffer {
 }
 
 const mainWindowActionRequestBuffer = new MainWindowActionRequestBuffer();
+const proactiveReminderOpenCallbacks = new Set<(id: string) => void>();
+let pendingProactiveReminderOpen: string | null = null;
+
+ipcRenderer.on("memmy:proactive-reminder-open", (_event: IpcRendererEvent, id: string) => {
+  if (typeof id !== "string") return;
+  if (proactiveReminderOpenCallbacks.size === 0) {
+    pendingProactiveReminderOpen = id;
+    return;
+  }
+  for (const callback of proactiveReminderOpenCallbacks) callback(id);
+});
 
 ipcRenderer.on("memmy:main-window-action-requested", (_event: IpcRendererEvent, request: MainWindowActionRequest) => {
   mainWindowActionRequestBuffer.publish(request);
@@ -160,6 +178,28 @@ const memmyPreloadApi: MemmyPreloadApi = {
 
   async openMailto(mailtoUrl: string): Promise<void> {
     return ipcRenderer.invoke("memmy:openMailto", mailtoUrl);
+  },
+
+  async createMacReminder(request: DesktopMacReminderRequest): Promise<DesktopMacReminderResult> {
+    return ipcRenderer.invoke("memmy:create-mac-reminder", request);
+  },
+
+  async openMacReminders(): Promise<void> {
+    return ipcRenderer.invoke("memmy:open-mac-reminders");
+  },
+
+  async notifyProactiveReminder(payload: DesktopProactiveReminderNotification): Promise<boolean> {
+    return ipcRenderer.invoke("memmy:notify-proactive-reminder", payload);
+  },
+
+  onProactiveReminderOpen(callback: (id: string) => void): () => void {
+    proactiveReminderOpenCallbacks.add(callback);
+    if (pendingProactiveReminderOpen) {
+      const id = pendingProactiveReminderOpen;
+      pendingProactiveReminderOpen = null;
+      callback(id);
+    }
+    return () => { proactiveReminderOpenCallbacks.delete(callback); };
   },
 
   async copyImageToClipboard(request: DesktopImageActionRequest): Promise<void> {

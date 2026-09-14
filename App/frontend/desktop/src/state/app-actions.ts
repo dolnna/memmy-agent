@@ -382,6 +382,10 @@ export const agentActions = {
     return { type: "agent/newChatRequested" };
   },
 
+  newChatDraftPrepared(content: string): AppAction {
+    return { type: "agent/newChatDraftPrepared", content };
+  },
+
   blankDraftReopened(): AppAction {
     return { type: "agent/blankDraftReopened" };
   },

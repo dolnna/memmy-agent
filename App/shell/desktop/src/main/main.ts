@@ -51,6 +51,8 @@ import { resolveRendererContextMenuCommands, resolveRendererContextMenuMaxLabelW
 import { startPackagedRendererStaticServer, type PackagedRendererStaticServer } from "./renderer-static-server.js";
 import { shouldBlockRendererReloadShortcut } from "./renderer-shortcuts.js";
 import { normalizeMailtoUrl } from "./mailto-url.js";
+import { createMacRemindersService } from "./mac-reminders.js";
+import { createProactiveReminderNotifier } from "./proactive-reminder-notifications.js";
 import {
   selectEmptyProjectDirectory,
   selectProjectDirectory,
@@ -160,6 +162,22 @@ let updateInstallForceExitTimer: ReturnType<typeof setTimeout> | null = null;
 let isManagedUpdateInstallerRunning = false;
 let shouldSuppressActivateAfterPetWindowClose = false;
 const programmaticPetWindowCloses = new WeakSet<BrowserWindow>();
+const macReminders = createMacRemindersService();
+const proactiveReminderNotifier = createProactiveReminderNotifier({
+  isSupported: () => Notification.isSupported(),
+  isMainWindowFocused: () => Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused()),
+  createNotification: (payload) => new Notification(payload),
+  onOpen: (id) => {
+    showMainWindow();
+    const target = mainWindow;
+    if (!target || target.isDestroyed()) return;
+    const deliver = () => {
+      if (!target.isDestroyed()) target.webContents.send("memmy:proactive-reminder-open", id);
+    };
+    if (target.webContents.isLoading()) target.webContents.once("did-finish-load", deliver);
+    else deliver();
+  },
+});
 
 type MainWindowUserAction = "close" | "minimize";
 type MainWindowActionResolution = "close" | "hide" | "minimize" | "pet" | "quit";
@@ -901,6 +919,10 @@ function registerIpcHandlers(): void {
   ipcMain.handle("memmy:openMailto", async (_event, mailtoUrl: string) => {
     await openMailtoUrl(mailtoUrl);
   });
+
+  ipcMain.handle("memmy:create-mac-reminder", (_event, request: unknown) => macReminders.create(request));
+  ipcMain.handle("memmy:open-mac-reminders", () => macReminders.open());
+  ipcMain.handle("memmy:notify-proactive-reminder", (_event, payload: unknown) => proactiveReminderNotifier.notify(payload));
 
   ipcMain.handle("memmy:copy-image-to-clipboard", async (event, request: DesktopImageActionRequest) => {
     await copyDesktopImageToClipboard(request, event.sender.getURL());
@@ -5001,6 +5023,10 @@ async function cleanupBeforeQuit(): Promise<void> {
   ipcMain.removeHandler("memmy:openExternal");
   ipcMain.removeHandler("memmy:openAgentTool");
   ipcMain.removeHandler("memmy:openMailto");
+  ipcMain.removeHandler("memmy:create-mac-reminder");
+  ipcMain.removeHandler("memmy:open-mac-reminders");
+  ipcMain.removeHandler("memmy:notify-proactive-reminder");
+  proactiveReminderNotifier.dispose();
   ipcMain.removeHandler("memmy:copy-image-to-clipboard");
   ipcMain.removeHandler("memmy:save-image");
   ipcMain.removeHandler("memmy:export-memory-database");

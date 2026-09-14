@@ -48,7 +48,8 @@ export const ComputerHistorySnapshotSchema = z.object({
     segmentId: z.string().nullable(),
     segmentStartedAt: z.string().nullable(),
     error: z.string().nullable(),
-    narrationError: z.string().nullable()
+    narrationError: z.string().nullable(),
+    recorderReady: z.boolean().optional()
   }).strict(),
   cuaRun: z.object({
     kind: z.enum(["smoke", "workflow"]).nullable(),

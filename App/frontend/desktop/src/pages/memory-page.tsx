@@ -10,7 +10,8 @@ import {
 } from "../app/product-tour-layout.js";
 import type { MessageKey } from "../i18n/messages.js";
 import { useTranslation } from "../i18n/use-translation.js";
-import { appActions } from "../state/app-actions.js";
+import { agentActions, appActions } from "../state/app-actions.js";
+import { clearFocusedAgentTarget } from "../app/routes.js";
 import { useAppState } from "../state/app-state.js";
 import { writeSettingsTabHash } from "./settings-nav.js";
 import { SidebarResizeHandle, useCodexResizableSidebar } from "./sidebar-resize.js";
@@ -108,12 +109,18 @@ export interface MemoryPageProps {
 export function MemoryPage(props: MemoryPageProps) {
   const { clients } = useApiClients();
   const { dispatch } = useAppState();
+  const { t } = useTranslation();
   const { track, ready: analyticsReady } = useAnalytics();
   const prevSubPageRef = useRef<MemorySubPageId | null>(null);
   const referenceRequestIdRef = useRef(0);
   const [activePage, setActivePage] = useState<MemorySubPageId>(() => props.initialSubPage ?? readInitialMemorySubPage());
   const [referenceRequest, setReferenceRequest] = useState<(MemoryReferenceOpenRequest & { page: MemoryReferencePage }) | null>(null);
   const client = clients?.memoryRuntime ?? null;
+  const askActivity = useCallback(() => {
+    clearFocusedAgentTarget(window.sessionStorage, window.location, window.history);
+    dispatch(agentActions.newChatDraftPrepared(t("historyIntro.askPrompt")));
+    dispatch(appActions.navigate("/main"));
+  }, [dispatch, t]);
 
   const handleSubPageChange = useCallback((page: MemorySubPageId) => {
     setReferenceRequest(null);
@@ -143,7 +150,7 @@ export function MemoryPage(props: MemoryPageProps) {
   const childByPage = useMemo<Record<MemorySubPageId, ReactNode>>(
     () => ({
       overview: <OverviewSubPage client={client} onNavigate={handleSubPageChange} />,
-      "computer-history": <ComputerHistorySubPage client={clients?.memmyAgent ?? null} />,
+      "computer-history": <ComputerHistorySubPage client={clients?.memmyAgent ?? null} onAskActivity={askActivity} />,
       memories: (
         <MemoriesSubPage
           client={client}
@@ -181,7 +188,7 @@ export function MemoryPage(props: MemoryPageProps) {
       logs: <LogsSubPage client={client} />,
       sources: <SourcesSubPage />
     }),
-    [client, clients?.memmyAgent, dispatch, handleOpenMemoryReference, handleSubPageChange, referenceRequest]
+    [client, clients?.memmyAgent, dispatch, askActivity, handleOpenMemoryReference, handleSubPageChange, referenceRequest]
   );
 
   useEffect(() => {

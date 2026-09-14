@@ -6,18 +6,36 @@ import { afterEach, describe, expect, it } from "vitest";
 // it here checks the real contract rather than a hand-maintained list of field
 // names, which drifted twice before anything caught it.
 import { ComputerHistorySnapshotSchema } from "../App/frontend/desktop/src/api/computer-history-contract.js";
+import { ProactiveRemindersSnapshotSchema } from "../App/frontend/desktop/src/api/proactive-reminders-contract.js";
 import { ComputerHistoryDemoService } from "../App/memmy-agent/src/entrypoints/frontend-bridge/computer-history-api.js";
+import { ProactiveReminders } from "../App/memmy-agent/src/core/agent-runtime/computer-history/proactive-reminders.js";
+import { buildProactiveEvidence } from "../App/memmy-agent/src/core/agent-runtime/computer-history/proactive-evidence.js";
 
 const roots: string[] = [];
 
-function service(): ComputerHistoryDemoService {
+function service(withSuggestion = false): ComputerHistoryDemoService {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "memmy-contract-"));
   roots.push(root);
+  const proactiveSettingsFile = path.join(root, "proactive-reminders.json");
+  if (withSuggestion) {
+    const now = Date.now();
+    const quote = "我明天下午把修改后的方案发给你";
+    const evidence = buildProactiveEvidence([JSON.stringify({
+      recordType: "human_event", sequence: 1, timestamp: new Date(now).toISOString(),
+      eventType: "mouse_click", application: { name: "Fixture Chat", bundleId: "test.chat" },
+      details: { accessibility: { role: "AXStaticText", title: quote } },
+    })], { now });
+    new ProactiveReminders(proactiveSettingsFile).accept({
+      decision: "now", title: "明天下午发送修改后的方案", reason: "你刚才答应发送方案。",
+      confidence: 0.95, evidenceQuote: quote, sourceEventIds: evidence.eventIds, dueAt: null,
+    }, evidence);
+  }
   return new ComputerHistoryDemoService({
     historyDirectory: path.join(root, "histories"),
     recordingDirectory: path.join(root, "recordings"),
     workflowDirectory: path.join(root, "workflows"),
     observationSettingsFile: path.join(root, "observation-settings.json"),
+    proactiveSettingsFile,
   });
 }
 
@@ -32,6 +50,25 @@ afterEach(() => {
 describe("snapshot contract with the desktop client", () => {
   it("accepts an empty snapshot", () => {
     expect(() => ComputerHistorySnapshotSchema.parse(service().snapshot())).not.toThrow();
+  });
+
+  it("accepts the actual empty proactive snapshot without dropping backend fields", () => {
+    const snapshot = service().proactiveSnapshot();
+    expect(snapshot.suggestions).toEqual([]);
+    expect(ProactiveRemindersSnapshotSchema.parse(snapshot)).toEqual(snapshot);
+  });
+
+  it("accepts persisted proactive suggestions and their action results", () => {
+    const instance = service(true);
+    const snapshot = instance.proactiveSnapshot();
+    expect(snapshot.suggestions).toHaveLength(1);
+    expect(snapshot.suggestions[0]).toMatchObject({
+      kind: "reminder", title: "明天下午发送修改后的方案", status: "pending", dueAt: null,
+    });
+    expect(ProactiveRemindersSnapshotSchema.parse(snapshot)).toEqual(snapshot);
+    const dismissed = instance.proactiveAction({ id: snapshot.suggestions[0].id, action: "dismiss" });
+    expect(dismissed.suggestions[0].status).toBe("dismissed");
+    expect(ProactiveRemindersSnapshotSchema.parse(dismissed)).toEqual(dismissed);
   });
 
   it("accepts a snapshot carrying a history, a workflow and a live segment", () => {

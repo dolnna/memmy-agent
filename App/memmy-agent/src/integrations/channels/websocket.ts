@@ -2730,6 +2730,9 @@ export class WebSocketChannel extends BaseChannel {
     if (got === "/api/settings") return this.handleSettings(request);
     if (got === "/api/commands") return this.handleCommands(request);
     if (got === "/api/computer-history") return this.handleComputerHistory(request, "snapshot");
+    if (got === "/api/computer-history/proactive") return this.handleComputerHistory(request, "proactive-snapshot");
+    if (got === "/api/computer-history/proactive/settings") return this.handleComputerHistory(request, "proactive-settings");
+    if (got === "/api/computer-history/proactive/action") return this.handleComputerHistory(request, "proactive-action");
     if (got === "/api/computer-history/delete") return this.handleComputerHistory(request, "history-delete");
     if (got === "/api/computer-history/pin") return this.handleComputerHistory(request, "history-pin");
     if (got === "/api/computer-history/demo-fixture") return this.handleComputerHistory(request, "demo-fixture");
@@ -2901,13 +2904,13 @@ export class WebSocketChannel extends BaseChannel {
 
   async handleComputerHistory(
     request: any,
-    action: "snapshot" | "history-delete" | "history-pin" | "demo-fixture" | "import" | "observation-start" | "observation-pause" | "observation-resume" | "observation-stop" | "workflow-create" | "cua-start" | "cua-smoke",
+    action: "snapshot" | "proactive-snapshot" | "proactive-settings" | "proactive-action" | "history-delete" | "history-pin" | "demo-fixture" | "import" | "observation-start" | "observation-pause" | "observation-resume" | "observation-stop" | "workflow-create" | "cua-start" | "cua-smoke",
   ): Promise<HttpLikeResponse> {
     if (!this.checkApiToken(request)) return httpError(401, "Unauthorized");
     const method = (request.method ?? "GET").toUpperCase();
-    if (action === "snapshot") {
+    if (action === "snapshot" || action === "proactive-snapshot") {
       return method === "GET"
-        ? httpJsonResponse(this.computerHistory.snapshot() as unknown as Record<string, any>)
+        ? httpJsonResponse((action === "snapshot" ? this.computerHistory.snapshot() : this.computerHistory.proactiveSnapshot()) as unknown as Record<string, any>)
         : httpError(405, "method not allowed");
     }
     if (method !== "POST") return httpError(405, "method not allowed");
@@ -2928,6 +2931,18 @@ export class WebSocketChannel extends BaseChannel {
     try {
       let snapshot;
       switch (action) {
+        case "proactive-settings":
+          snapshot = this.computerHistory.setProactiveEnabled(body.enabled);
+          break;
+        case "proactive-action":
+          snapshot = this.computerHistory.proactiveAction({
+            id: typeof body.id === "string" ? body.id : "",
+            action: typeof body.action === "string" ? body.action : "",
+            reminder_id: body.reminder_id,
+            title: body.title,
+            due_at: body.due_at,
+          });
+          break;
         case "history-delete":
           snapshot = this.computerHistory.deleteHistory(String(body.history_id ?? ""));
           break;

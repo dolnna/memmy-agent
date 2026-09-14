@@ -12,6 +12,11 @@ import {
   ComputerHistorySnapshotSchema,
   ComputerHistoryWorkflowSchema,
 } from "./computer-history-contract.js";
+import {
+  ProactiveRemindersSnapshotSchema,
+  type ProactiveRemindersSnapshot,
+  type ProactiveReminderAction
+} from "./proactive-reminders-contract.js";
 
 export { ComputerHistorySnapshotSchema };
 
@@ -93,6 +98,7 @@ export type ComputerHistorySnapshot = {
     segmentStartedAt: string | null;
     error: string | null;
     narrationError: string | null;
+    recorderReady?: boolean;
   };
   cuaRun: {
     kind: "smoke" | "workflow" | null;
@@ -710,6 +716,9 @@ export interface MemmyAgentClient {
   bootstrap(options?: { force?: boolean }): Promise<MemmyAgentBootstrap>;
   getSettings(): Promise<MemmyAgentSettings>;
   getComputerHistory(): Promise<ComputerHistorySnapshot>;
+  getProactiveReminders(): Promise<ProactiveRemindersSnapshot>;
+  updateProactiveRemindersSettings(enabled: boolean): Promise<ProactiveRemindersSnapshot>;
+  actOnProactiveReminder(input: ProactiveReminderAction): Promise<ProactiveRemindersSnapshot>;
   deleteComputerHistory(historyId: string): Promise<ComputerHistorySnapshot>;
   pinComputerHistory(historyId: string, pinned: boolean): Promise<ComputerHistorySnapshot>;
   installComputerHistoryDemo(): Promise<ComputerHistorySnapshot>;
@@ -1063,6 +1072,22 @@ class HttpMemmyAgentClient implements MemmyAgentClient {
 
   async getComputerHistory(): Promise<ComputerHistorySnapshot> {
     return this.request("/api/computer-history", ComputerHistorySnapshotSchema);
+  }
+
+  async getProactiveReminders(): Promise<ProactiveRemindersSnapshot> {
+    return this.request("/api/computer-history/proactive", ProactiveRemindersSnapshotSchema);
+  }
+
+  async updateProactiveRemindersSettings(enabled: boolean): Promise<ProactiveRemindersSnapshot> {
+    return this.request("/api/computer-history/proactive/settings", ProactiveRemindersSnapshotSchema, {
+      method: "POST", body: { enabled }
+    });
+  }
+
+  async actOnProactiveReminder(input: ProactiveReminderAction): Promise<ProactiveRemindersSnapshot> {
+    return this.request("/api/computer-history/proactive/action", ProactiveRemindersSnapshotSchema, {
+      method: "POST", body: input
+    });
   }
 
   async deleteComputerHistory(historyId: string): Promise<ComputerHistorySnapshot> {

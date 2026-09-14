@@ -22,6 +22,7 @@ function temporaryStore(): ObservationSettingsStore {
 const snapshot = (state: string) => ({
   observation: {
     state,
+    recorderReady: state === "running",
     startedAt: "2026-09-08T00:00:00.000Z",
     segmentId: "2026-09-08T00-00-00Z",
     segmentStartedAt: "2026-09-08T00:00:00.000Z",
@@ -76,6 +77,10 @@ describe("Computer History settings tools", () => {
     const result = JSON.parse(await tool.execute());
 
     expect(result.state).toBe("running");
+    expect(Number.isFinite(Date.parse(result.current_time))).toBe(true);
+    expect(result.timezone).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone);
+    expect(result.narration_error).toBeNull();
+    expect(result.recorder_ready).toBe(true);
     // The summaries say what a window was about; the raw streams say what
     // specifically happened in it. Reporting only one leaves half the record
     // unreachable.
