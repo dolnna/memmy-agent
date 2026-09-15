@@ -20,6 +20,10 @@ export interface AgentModelSelectorProps {
   scopeKey: string;
   disabled: boolean;
   seedConfig?: ModelProviderConfig | null;
+  /** When set, the selector stays on the official model and cannot be opened. */
+  locked?: boolean;
+  lockReason?: string;
+  forcedPresetId?: string | null;
 }
 
 /** Per-chat catalog preset picker. Selection lives in Agent state, never browser storage. */
@@ -29,11 +33,14 @@ export function AgentModelSelector(props: AgentModelSelectorProps) {
   const workspace = createModelWorkspace(props.seedConfig ?? state.modelConfig);
   const candidates = getTaskModelCandidates(workspace, props.mode);
   const committedSelection = state.agent.committedModelSelectionByScope[props.scopeKey];
-  const selectedPreset = state.agent.pendingPresetByScope[props.scopeKey]
+  const selectedPreset = props.forcedPresetId
+    ?? state.agent.pendingPresetByScope[props.scopeKey]
     ?? committedSelection?.presetId
     ?? null;
   const resolved = resolveModelSelection(workspace, props.mode, selectedPreset);
   const hasNoModels = candidates.length === 0;
+  const locked = Boolean(props.locked);
+  const lockReason = props.lockReason ?? t("home.modelSelector.pluginLocked");
 
   const options: SelectOption[] = candidates.map((candidate) => ({
         value: candidate.id,
@@ -83,7 +90,11 @@ export function AgentModelSelector(props: AgentModelSelectorProps) {
   }
 
   return (
-    <div className="agent-model-selector" data-model-selector-scope={props.scopeKey}>
+    <div
+      className={`agent-model-selector${locked ? " agent-model-selector--locked" : ""}`}
+      data-model-selector-scope={props.scopeKey}
+      title={locked ? lockReason : undefined}
+    >
       <Select
         label={t("home.modelSelector.label")}
         labelClassName="sr-only"
@@ -93,11 +104,12 @@ export function AgentModelSelector(props: AgentModelSelectorProps) {
           : t("home.modelSelector.empty")}
         options={options}
         onValueChange={selectModel}
-        disabled={props.disabled}
+        disabled={props.disabled || locked}
+        title={locked ? lockReason : undefined}
         className="select-control--compact select-control--subtle agent-model-selector__control"
         buttonClassName="agent-model-selector__button"
         menuClassName="agent-model-selector__menu"
-        menuFooter={({ close }) => (
+        menuFooter={locked ? undefined : ({ close }) => (
           <div className="agent-model-selector__footer">
             <button
               type="button"

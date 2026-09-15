@@ -84,6 +84,7 @@ import {
 } from "./agent-question-card.js";
 import { PluginCapabilityHost } from "./plugin-capability-host.js";
 import { PluginArtifactPreviewPanel } from "./plugin-artifact-preview-panel.js";
+import { pluginRequiresOfficialModel } from "./official-plugin-catalog.js";
 import { AgentWorkspaceContext } from "./agent-workspace-context.js";
 import { AppFrame } from "./app-frame.js";
 import {
@@ -221,6 +222,7 @@ const TRANSLATABLE_AGENT_ERROR_KEYS = new Set<MessageKey>([
   "home.composer.emptyMessage",
   "home.goal.controlUnknown",
   "home.modelSelector.unavailable",
+  "home.modelSelector.pluginRequiresLogin",
   "home.project.desktopRequired",
   "home.queue.removeFailed",
   "home.queue.steerFailed",
@@ -1148,11 +1150,21 @@ export function HomePage() {
   const selectedModelPreset = state.agent.pendingPresetByScope[modelSelectionScopeKey]
     ?? state.agent.committedModelSelectionByScope[modelSelectionScopeKey]?.presetId
     ?? null;
-  const resolvedConversationModel = resolveModelSelection(
-    modelWorkspace,
-    modelWorkspaceMode,
-    selectedModelPreset
-  );
+  const input = composerDrafts[chatScopeKey] ?? "";
+  const pluginCommandTargets = collectPluginCommandTargets(installedPlugins, [
+    "/stop",
+    "/last-compaction",
+    COMPOSER_GOAL_COMMAND,
+    ...slashCommands.map((command) => command.command)
+  ]);
+  const pluginCommandInvocation = parsePluginCommandInvocation(input, pluginCommandTargets);
+  // A login-required official plugin (e.g. literature review) in the composer still requires sign-in,
+  // but no longer forces the model. The official model is only recommended (explained on the plugin page);
+  // the user keeps full model choice here.
+  const loginRequiredPluginActive = pluginRequiresOfficialModel(pluginCommandInvocation?.plugin.id)
+    || input.trim().split(/\s/, 1)[0]?.toLowerCase() === "/literature-review";
+  const selectorMode = modelWorkspaceMode;
+  const resolvedConversationModel = resolveModelSelection(modelWorkspace, selectorMode, selectedModelPreset);
   useEffect(() => {
     setAnalyticsModelSource(resolvedConversationModel.candidate?.source ?? null);
     return () => setAnalyticsModelSource(null);
@@ -1168,7 +1180,6 @@ export function HomePage() {
       .catch(() => { if (active) setInstalledPlugins([]); });
     return () => { active = false; };
   }, [clients, pluginUiPluginKey]);
-  const input = composerDrafts[chatScopeKey] ?? "";
   const composerCommandDraft = resolveComposerCommandDraft(
     input,
     selectedComposerCommandsByScope[chatScopeKey] ?? null
@@ -1840,12 +1851,6 @@ export function HomePage() {
     argHint: "",
     synthetic: true
   };
-  const pluginCommandTargets = collectPluginCommandTargets(installedPlugins, [
-    "/stop",
-    "/last-compaction",
-    COMPOSER_GOAL_COMMAND,
-    ...slashCommands.map((command) => command.command)
-  ]);
   const pluginSlashCommands: SlashCommandPaletteItem[] = pluginCommandTargets.map(({ command }) => ({
     command: command.command,
     title: command.name,
@@ -1898,7 +1903,6 @@ export function HomePage() {
   const hasComposerPayload = Boolean(input.trim() || pendingAttachments.some((item) => item.status === "ready"));
   const hasComposerIntent = Boolean(input.trim() || pendingAttachments.length > 0);
   const stopInFlight = state.agent.currentChatId ? Boolean(state.agent.stopInFlightByChatId[state.agent.currentChatId]) : false;
-  const pluginCommandInvocation = parsePluginCommandInvocation(input, pluginCommandTargets);
   const agentRoutedPluginPrompt = buildAgentRoutedPluginPrompt(input, pluginCommandTargets);
   const isDirectPluginCommand = Boolean(pluginCommandInvocation && !agentRoutedPluginPrompt);
   const composerSendDisabled = isDirectPluginCommand
@@ -2054,6 +2058,14 @@ export function HomePage() {
    */
   async function sendMessage() {
     if (runExactLocalSlashCommand(input)) {
+      return;
+    }
+    if (loginRequiredPluginActive && !state.account.userId) {
+      dispatch(agentActions.operationFailed("chat", createAgentOperationError({
+        source: "send",
+        message: "home.modelSelector.pluginRequiresLogin",
+        ...(state.agent.currentChatId ? { chatId: state.agent.currentChatId } : { scopeKey: chatScopeKey })
+      })));
       return;
     }
     if (resolvedConversationModel.unavailable) {
@@ -3379,7 +3391,7 @@ export function HomePage() {
                   </div>
                   <div className="composer-actions absolute bottom-3 right-4 z-50">
                     <AgentModelSelector
-                      mode={modelWorkspaceMode}
+                      mode={selectorMode}
                       scopeKey={modelSelectionScopeKey}
                       disabled={isCurrentAgentRunning || isCreatingChat || messageSendInFlight}
                       seedConfig={state.modelConfig}
@@ -3646,7 +3658,7 @@ export function HomePage() {
                       </div>
                       <div className="composer-actions">
                         <AgentModelSelector
-                          mode={modelWorkspaceMode}
+                          mode={selectorMode}
                           scopeKey={modelSelectionScopeKey}
                           disabled={isCurrentAgentRunning || isCreatingChat || messageSendInFlight}
                           seedConfig={state.modelConfig}
