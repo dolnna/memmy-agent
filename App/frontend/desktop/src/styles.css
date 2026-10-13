@@ -12576,6 +12576,11 @@ input[type="checkbox"].check-sky:checked::after {
   right: calc(12px + var(--codex-toolbar-button-size));
 }
 
+.litrev-split:has(.legal-recording-library, .legal-recording-session, .legal-recording-preview)
+  > .litrev-recording-toggle {
+  display: none;
+}
+
 .litrev-scroll {
   flex: 1;
   min-height: 0;
