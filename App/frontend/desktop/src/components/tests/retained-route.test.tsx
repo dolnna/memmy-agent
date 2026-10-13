@@ -81,6 +81,23 @@ describe("RetainedRoute", () => {
     expect(container.querySelector("output")!.textContent).toBe("2");
   });
 
+  it("keeps a live recording effect running while its route is hidden", async () => {
+    await act(async () => root.render(<RetainedRoute active preserveEffects><DraftPage onSetup={onSetup} onCleanup={onCleanup} /></RetainedRoute>));
+    await act(async () => root.render(<RetainedRoute active={false} preserveEffects><DraftPage onSetup={onSetup} onCleanup={onCleanup} /></RetainedRoute>));
+    expect(onCleanup).not.toHaveBeenCalled();
+    expect(container.firstElementChild?.getAttribute("style")).toContain("display: none");
+    await act(async () => { window.dispatchEvent(new Event("retained-route-test")); });
+    expect(container.querySelector("output")?.textContent).toBe("1");
+    await act(async () => root.render(<RetainedRoute active preserveEffects><DraftPage onSetup={onSetup} onCleanup={onCleanup} /></RetainedRoute>));
+    expect(container.querySelector("output")?.textContent).toBe("1");
+    expect(onSetup).toHaveBeenCalledOnce();
+    await act(async () => root.render(<RetainedRoute active={false} preserveEffects={false}><DraftPage onSetup={onSetup} onCleanup={onCleanup} /></RetainedRoute>));
+    expect(onCleanup).toHaveBeenCalledOnce();
+    await act(async () => root.render(<RetainedRoute active preserveEffects={false}><DraftPage onSetup={onSetup} onCleanup={onCleanup} /></RetainedRoute>));
+    expect(container.querySelector("output")?.textContent).toBe("1");
+    expect(onSetup).toHaveBeenCalledTimes(2);
+  });
+
   it("clears retained state and visited status when the account or route instance key changes", async () => {
     await render(true);
     await typeDraft("上一个账号的内容");

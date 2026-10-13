@@ -41,6 +41,7 @@ import {
 } from "./labor-diagnostic-workspace.js";
 import { LaborDiagnosticWorkflow, type LegalRecordingController } from "./labor-diagnostic-workflow.js";
 import { useRecordingSummary } from "./recording-summary.js";
+import { interviewRecordingSession, useActiveInterviewRecording, withActiveInterviewRecording, type InterviewRecordingControls } from "./interview-recording-session.js";
 
 const LEGAL_PROJECT_TEXT_PREVIEW_PATTERN = /\.(?:c|cc|cpp|css|csv|go|h|hpp|html?|ini|java|js|json|jsx|log|md|mjs|py|rb|rs|sh|sql|tex|toml|ts|tsx|txt|xml|ya?ml)$/i;
 const LEGAL_PROJECT_TEXT_PREVIEW_MAX_CHARS = 512 * 1024;
@@ -70,6 +71,8 @@ export function LaborDiagnosticPage() {
     transcript: "",
     transcriptSource: null
   });
+  const activeInterviewRecording = useActiveInterviewRecording();
+  const recordingControlsRef = useRef<InterviewRecordingControls | null>(null);
   const recordingSnapshotRef = useRef({
     id: recordingId,
     title: recordingTitle,
@@ -78,6 +81,7 @@ export function LaborDiagnosticPage() {
     preview: recordingPreview
   });
   recordingIdRef.current = recordingId;
+  useEffect(() => () => interviewRecordingSession.release(recordingIdRef.current), []);
   recordingSnapshotRef.current = {
     id: recordingId,
     title: recordingTitle,
@@ -131,6 +135,14 @@ export function LaborDiagnosticPage() {
   } | null>(null);
   const [prompt] = useState(() => readLegalDiagnosisPrompt());
   const [sourceInput] = useState(() => readLegalDiagnosisSourceInput());
+  const legalScopeKey = JSON.stringify([
+    appState.account.userId, appState.bootstrap?.app.userMode, projectContextId, prompt, sourceInput
+  ]);
+  const externalRecording = activeInterviewRecording
+    && !(activeInterviewRecording.owner.kind === "legal"
+      && activeInterviewRecording.owner.scopeKey === legalScopeKey
+      && activeInterviewRecording.item.id === recordingId)
+    ? activeInterviewRecording : null;
 
   useEffect(() => {
     const client = clients?.memmyAgent;
@@ -191,9 +203,8 @@ export function LaborDiagnosticPage() {
     ]);
   }, []);
 
-  const beginRecordingItem = useCallback((preview: LegalRecordingPreviewState) => {
+  const beginRecordingItem = useCallback((preview: LegalRecordingPreviewState, id = `recording-${crypto.randomUUID()}`) => {
     archiveCurrentRecording();
-    const id = `recording-${crypto.randomUUID()}`;
     const title = t("legalDiagnosis.recording.preview.recordingTitle");
     const createdAt = new Date().toISOString();
     recordingIdRef.current = id;
@@ -238,11 +249,24 @@ export function LaborDiagnosticPage() {
     return clients.asr.transcribe(transcribeInput);
   }, [clients?.asr, t]);
 
-  const updateRecordingPreview = useCallback((next: LegalRecordingPreviewState) => {
+  const updateRecordingPreview = useCallback((next: LegalRecordingPreviewState): boolean => {
     const beginsOperation = recordingOperationIdRef.current === null
       && (next.mode === "starting" || next.mode === "transcribing");
     if (beginsOperation) {
-      beginRecordingItem(next);
+      const id = `recording-${crypto.randomUUID()}`;
+      const label = t("legalDiagnosis.recording.preview.recordingTitle");
+      const createdAt = new Date().toISOString();
+      if (!interviewRecordingSession.claim(
+        { kind: "legal", scopeKey: legalScopeKey },
+        { id, label, createdAt, state: next },
+        {
+          pause: () => recordingControlsRef.current?.pause(),
+          resume: () => recordingControlsRef.current?.resume(),
+          finish: () => recordingControlsRef.current?.finish(),
+          rename: (name) => recordingControlsRef.current?.rename?.(name)
+        }
+      )) return false;
+      beginRecordingItem(next, id);
     } else {
       const current = recordingSnapshotRef.current.preview;
       const preserveLiveTranscript = next.mode === "recording"
@@ -258,19 +282,30 @@ export function LaborDiagnosticPage() {
       recordingSnapshotRef.current = { ...recordingSnapshotRef.current, preview: resolved };
       setRecordingPreview(resolved);
     }
-    if (next.mode === "completed" || next.mode === "idle") recordingOperationIdRef.current = null;
+    const snapshot = recordingSnapshotRef.current;
+    interviewRecordingSession.publish(snapshot.id, {
+      id: snapshot.id,
+      label: snapshot.title,
+      createdAt: snapshot.createdAt,
+      state: { ...snapshot.preview, ...(snapshot.audio ? { recording: snapshot.audio } : {}) }
+    });
+    if (next.mode === "completed" || next.mode === "idle") {
+      recordingOperationIdRef.current = null;
+      interviewRecordingSession.release(snapshot.id);
+    }
     if (next.mode === "starting" || next.mode === "transcribing") {
       setRecordingSurface("session");
       openArtifact(LEGAL_DIAG_RECORDING_TAB_ID, { fileTreeOpen: false });
     }
-  }, [beginRecordingItem, openArtifact]);
+    return true;
+  }, [beginRecordingItem, legalScopeKey, openArtifact, t]);
 
   const currentRecordingState = useMemo<LegalRecordingPreviewState>(() => ({
     ...recordingPreview,
     ...(recordingAudio ? { recording: recordingAudio } : {})
   }), [recordingAudio, recordingPreview]);
 
-  const recordingItems = useMemo<LegalRecordingViewItem[]>(() => [
+  const recordingItems = useMemo<LegalRecordingViewItem[]>(() => withActiveInterviewRecording([
     ...recordingHistory.filter((item) => item.id !== recordingId),
     ...(recordingHasContent(currentRecordingState) ? [{
       id: recordingId,
@@ -278,7 +313,24 @@ export function LaborDiagnosticPage() {
       createdAt: recordingCreatedAt,
       state: currentRecordingState
     }] : [])
-  ], [currentRecordingState, recordingCreatedAt, recordingHistory, recordingId, recordingTitle]);
+  ], activeInterviewRecording), [activeInterviewRecording, currentRecordingState, recordingCreatedAt, recordingHistory, recordingId, recordingTitle]);
+
+  useEffect(() => {
+    if (activeInterviewRecording?.item.id !== recordingId) return;
+    interviewRecordingSession.publish(recordingId, {
+      id: recordingId,
+      label: recordingTitle,
+      createdAt: recordingCreatedAt,
+      state: currentRecordingState
+    });
+  }, [activeInterviewRecording?.item.id, currentRecordingState, recordingCreatedAt, recordingId, recordingTitle]);
+
+  useEffect(() => {
+    if (!externalRecording) return;
+    setSelectedRecordingId(externalRecording.item.id);
+    setRecordingSurface("session");
+    openArtifact(LEGAL_DIAG_RECORDING_TAB_ID, { fileTreeOpen: false });
+  }, [externalRecording?.item.id, openArtifact]);
 
   const selectedRecording = recordingItems.find((item) => item.id === selectedRecordingId)
     ?? recordingItems.find((item) => item.id === recordingId)
@@ -363,6 +415,12 @@ export function LaborDiagnosticPage() {
         activeState={selectedState}
         activeLabel={selectedRecording?.label ?? t("legalDiagnosis.recording.preview.recordingTitle")}
         onStart={() => {
+          const active = interviewRecordingSession.getSnapshot();
+          if (active) {
+            setSelectedRecordingId(active.item.id);
+            setRecordingSurface("session");
+            return;
+          }
           setRecordingSurface("session");
           void recordingControllerRef.current?.start();
         }}
@@ -374,6 +432,10 @@ export function LaborDiagnosticPage() {
         onRename={(id, name) => {
           const title = name.trim();
           if (!title) return;
+          if (externalRecording?.item.id === id) {
+            interviewRecordingSession.rename(title);
+            return;
+          }
           if (id === recordingId) setRecordingTitle(title);
           setRecordingHistory((current) => current.map((item) => item.id === id ? { ...item, label: title } : item));
         }}
@@ -386,9 +448,9 @@ export function LaborDiagnosticPage() {
           || composerRecorder.isRecording || composerRecorder.isStarting || composerRecorder.isTranscribing}
         summaryError={recordingSummary.error}
         onBack={() => setRecordingSurface("list")}
-        onPause={() => recordingControllerRef.current?.pause()}
-        onResume={() => recordingControllerRef.current?.resume()}
-        onFinish={() => void recordingControllerRef.current?.finish()}
+        onPause={() => externalRecording ? interviewRecordingSession.pause() : recordingControllerRef.current?.pause()}
+        onResume={() => externalRecording ? interviewRecordingSession.resume() : recordingControllerRef.current?.resume()}
+        onFinish={() => externalRecording ? interviewRecordingSession.finish() : void recordingControllerRef.current?.finish()}
       />
     );
   }, [phase.kind, recordingId, recordingItems, recordingSurface, selectedRecording, t, recordingSummary, recorder, composerRecorder]);
@@ -398,6 +460,13 @@ export function LaborDiagnosticPage() {
     : phase.kind === "review"
       ? t("legalDiagnosis.title.result")
       : t("legalDiagnosis.title.setup");
+
+  recordingControlsRef.current = {
+    pause: () => recordingControllerRef.current?.pause(),
+    resume: () => recordingControllerRef.current?.resume(),
+    finish: () => void recordingControllerRef.current?.finish(),
+    rename: (name) => setRecordingTitle(name)
+  };
 
   return (
     <AppFrame title={t("nav.legalDiagnosis")} reserveTopBar={false}>
@@ -447,10 +516,14 @@ export function LaborDiagnosticPage() {
             onTranscriptReady={(next) => setTranscript((current) => current ? `${current}\n\n${next}` : next)}
             onRecordingPreviewChange={updateRecordingPreview}
             onOpenRecording={() => {
-              setSelectedRecordingId(recordingId);
+              setSelectedRecordingId(externalRecording?.item.id ?? recordingId);
               setRecordingSurface("session");
               openArtifact(LEGAL_DIAG_RECORDING_TAB_ID, { fileTreeOpen: false });
             }}
+            sharedRecording={externalRecording?.item.state}
+            onSharedRecordingPause={() => interviewRecordingSession.pause()}
+            onSharedRecordingResume={() => interviewRecordingSession.resume()}
+            onSharedRecordingFinish={() => interviewRecordingSession.finish()}
             recordingControllerRef={recordingControllerRef}
             onSourcesChange={setSourceItems}
             onOpenArtifact={openArtifact}

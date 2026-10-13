@@ -121,6 +121,7 @@ import {
   type LegalRecordingViewItem
 } from "./labor-recording-preview-pane.js";
 import { useRecordingSummary } from "./recording-summary.js";
+import { interviewRecordingSession, useActiveInterviewRecording, withActiveInterviewRecording, type InterviewRecordingControls } from "./interview-recording-session.js";
 
 export { agentChatScopeKey, updateComposerDraftForScope };
 export { agentAttachmentSourceKey, hashAgentAttachmentFile };
@@ -1029,7 +1030,10 @@ export function HomePage() {
     transcript: "",
     transcriptSource: null
   });
+  const activeInterviewRecording = useActiveInterviewRecording();
+  const taskRecordingControlsRef = useRef<InterviewRecordingControls | null>(null);
   taskRecordingIdRef.current = taskRecordingId;
+  useEffect(() => () => interviewRecordingSession.release(taskRecordingIdRef.current), []);
   const [isCreatingChat, setIsCreatingChat] = useState(false);
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
   const [projectPickerOperationId, setProjectPickerOperationId] = useState<string | null>(null);
@@ -1143,6 +1147,29 @@ export function HomePage() {
     }));
   }, [taskRecordingRecorder.status, taskRecordingSeconds]);
   const chatScopeKey = agentChatScopeKey(state.agent.currentChatId, state.agent.newChatRequestId);
+  useEffect(() => {
+    if (!activeInterviewRecording) return;
+    setSelectedTaskRecordingId(activeInterviewRecording.item.id);
+    setTaskRecordingSurface("session");
+    setPreviewPanelOpen(true);
+    setPreviewOpenRequest((current) => ({
+      path: TASK_RECORDING_TAB_ID,
+      requestId: (current?.requestId ?? 0) + 1,
+      fileTreeOpen: false
+    }));
+  }, [activeInterviewRecording?.item.id, chatScopeKey]);
+  useEffect(() => {
+    if (activeInterviewRecording?.item.id !== taskRecordingId) return;
+    interviewRecordingSession.publish(taskRecordingId, {
+      id: taskRecordingId,
+      label: taskRecordingTitle,
+      createdAt: taskRecordingCreatedAt,
+      state: {
+        ...taskRecordingPreview,
+        ...(taskRecordingAudio ? { recording: taskRecordingAudio } : {})
+      }
+    });
+  }, [activeInterviewRecording?.item.id, taskRecordingAudio, taskRecordingCreatedAt, taskRecordingId, taskRecordingPreview, taskRecordingTitle]);
   const modelSelectionScopeKey = state.agent.currentChatId ?? NEW_TASK_MODEL_SCOPE_KEY;
   const modelWorkspaceMode = state.bootstrap?.app.userMode === "byok" ? "byok" : "account";
   const selectedModelPreset = state.agent.pendingPresetByScope[modelSelectionScopeKey]
@@ -2902,9 +2929,8 @@ export function HomePage() {
     ]);
   }
 
-  function beginTaskRecordingItem(label: string, createdAt = new Date().toISOString()): string {
+  function beginTaskRecordingItem(label: string, createdAt = new Date().toISOString(), id = `recording-${crypto.randomUUID()}`): string {
     archiveCurrentTaskRecording();
-    const id = `recording-${crypto.randomUUID()}`;
     taskRecordingIdRef.current = id;
     setTaskRecordingId(id);
     setSelectedTaskRecordingId(id);
@@ -2914,7 +2940,25 @@ export function HomePage() {
   }
 
   async function startTaskRecording() {
-    beginTaskRecordingItem(t("legalDiagnosis.recording.preview.recordingTitle"));
+    if (interviewRecordingSession.getSnapshot()) {
+      setSelectedTaskRecordingId(interviewRecordingSession.getSnapshot()!.item.id);
+      setTaskRecordingSurface("session");
+      return;
+    }
+    const id = `recording-${crypto.randomUUID()}`;
+    const label = t("legalDiagnosis.recording.preview.recordingTitle");
+    const createdAt = new Date().toISOString();
+    if (!interviewRecordingSession.claim(
+      { kind: "agent", scopeKey: chatScopeKey },
+      { id, label, createdAt, state: { mode: "starting", elapsedSeconds: 0, transcript: "", transcriptSource: null } },
+      {
+        pause: () => taskRecordingControlsRef.current?.pause(),
+        resume: () => taskRecordingControlsRef.current?.resume(),
+        finish: () => taskRecordingControlsRef.current?.finish(),
+        rename: (name) => taskRecordingControlsRef.current?.rename?.(name)
+      }
+    )) return;
+    beginTaskRecordingItem(label, createdAt, id);
     setTaskRecordingSurface("session");
     setTaskRecordingSeconds(0);
     setTaskRecordingAudio(undefined);
@@ -2927,6 +2971,7 @@ export function HomePage() {
     try {
       await taskRecordingRecorder.start();
     } catch (error) {
+      interviewRecordingSession.release(id);
       setTaskRecordingPreview({
         mode: "idle",
         elapsedSeconds: 0,
@@ -2955,6 +3000,7 @@ export function HomePage() {
         transcriptSource: null,
         realtimeError: readableError(error)
       }));
+      interviewRecordingSession.release(taskRecordingIdRef.current);
     }
   }
 
@@ -3008,6 +3054,7 @@ export function HomePage() {
       transcriptSource: transcript ? "asr" : null,
       ...(segments.length ? { segments } : {})
     }));
+    interviewRecordingSession.release(taskRecordingIdRef.current);
   }
 
   function addTaskRecordingToConversation(item: LegalRecordingViewItem) {
@@ -3031,10 +3078,10 @@ export function HomePage() {
       createdAt: taskRecordingCreatedAt,
       state: currentState
     } : null;
-    const items = [
+    const items = withActiveInterviewRecording([
       ...taskRecordingHistory.filter((item) => item.id !== taskRecordingId),
       ...(currentItem ? [currentItem] : [])
-    ];
+    ], activeInterviewRecording);
     const selectedItem = items.find((item) => item.id === selectedTaskRecordingId)
       ?? currentItem
       ?? items[0];
@@ -3051,7 +3098,7 @@ export function HomePage() {
         activeState={selectedState}
         activeLabel={selectedItem?.label ?? t("legalDiagnosis.recording.preview.recordingTitle")}
         onStart={() => void startTaskRecording()}
-        onUpload={(file) => void uploadTaskRecording(file)}
+        onUpload={(file) => { if (!interviewRecordingSession.getSnapshot()) void uploadTaskRecording(file); }}
         onSelect={(id) => {
           setSelectedTaskRecordingId(id);
           setTaskRecordingSurface("session");
@@ -3059,6 +3106,10 @@ export function HomePage() {
         onRename={(id, name) => {
           const title = name.trim();
           if (!title) return;
+          if (activeInterviewRecording?.item.id === id && id !== taskRecordingId) {
+            interviewRecordingSession.rename(title);
+            return;
+          }
           if (id === taskRecordingId) setTaskRecordingTitle(title);
           setTaskRecordingHistory((current) => current.map((item) => item.id === id ? { ...item, label: title } : item));
         }}
@@ -3067,12 +3118,19 @@ export function HomePage() {
         summaryDisabled={recordingSummary.preparing || asrRecorder.isRecording || asrRecorder.isStarting || asrRecorder.isTranscribing}
         summaryError={recordingSummary.error}
         onBack={() => setTaskRecordingSurface("list")}
-        onPause={() => taskRecordingRecorder.pause()}
-        onResume={() => taskRecordingRecorder.resume()}
-        onFinish={() => void finishTaskRecording()}
+        onPause={() => activeInterviewRecording ? interviewRecordingSession.pause() : taskRecordingRecorder.pause()}
+        onResume={() => activeInterviewRecording ? interviewRecordingSession.resume() : taskRecordingRecorder.resume()}
+        onFinish={() => activeInterviewRecording ? interviewRecordingSession.finish() : void finishTaskRecording()}
       />
     );
   }
+
+  taskRecordingControlsRef.current = {
+    pause: () => taskRecordingRecorder.pause(),
+    resume: () => taskRecordingRecorder.resume(),
+    finish: () => void finishTaskRecording(),
+    rename: (name) => setTaskRecordingTitle(name)
+  };
 
 
   /**

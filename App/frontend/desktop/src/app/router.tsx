@@ -64,6 +64,7 @@ import { ToolsPage } from "../pages/tools-page.js";
 import { WelcomePage } from "../pages/welcome-page.js";
 import { RetainedRoute } from "../components/retained-route.js";
 import { readLegalDiagnosisProjectContext, readLegalDiagnosisPrompt, readLegalDiagnosisSourceInput } from "../pages/labor-diagnostic-model.js";
+import { useActiveInterviewRecording } from "../pages/interview-recording-session.js";
 
 function readWorkspaceGuidanceOverlay(storage: Storage | undefined): Extract<DeferredGuidanceStep, "product_tour" | "nickname"> | null {
   const step = readDeferredGuidanceStep(storage);
@@ -73,6 +74,7 @@ function readWorkspaceGuidanceOverlay(storage: Storage | undefined): Extract<Def
 /** Handles app router. */
 export function AppRouter(props: { onRetry: () => void }) {
   const { state, dispatch } = useAppState();
+  const activeInterviewRecording = useActiveInterviewRecording();
   const { clients } = useOptionalApiClients();
   const { track, ready: analyticsReady } = useAnalytics();
   const { language } = useTranslation();
@@ -147,6 +149,29 @@ export function AppRouter(props: { onRetry: () => void }) {
   }, [state.navigation.currentPath, state.startup.status]);
 
   const currentPath = state.navigation.currentPath;
+  const currentLegalKey = JSON.stringify([
+    state.account.userId, state.bootstrap?.app.userMode,
+    ...(typeof window === "undefined" ? [] : [readLegalDiagnosisProjectContext(), readLegalDiagnosisPrompt(), readLegalDiagnosisSourceInput()])
+  ]);
+  const activeLegalKey = activeInterviewRecording?.owner.kind === "legal"
+    ? activeInterviewRecording.owner.scopeKey : null;
+  const legalAccountKey = JSON.stringify([state.account.userId, state.bootstrap?.app.userMode]);
+  const [retainedLegal, setRetainedLegal] = useState(() => ({ accountKey: legalAccountKey, keys: [currentLegalKey] }));
+  useEffect(() => {
+    setRetainedLegal((current) => ({
+      accountKey: legalAccountKey,
+      keys: [...new Set([
+        ...(current.accountKey === legalAccountKey ? current.keys : []),
+        currentLegalKey,
+        ...(activeLegalKey ? [activeLegalKey] : [])
+      ])]
+    }));
+  }, [activeLegalKey, currentLegalKey, legalAccountKey]);
+  const legalKeys = [...new Set([
+    ...(retainedLegal.accountKey === legalAccountKey ? retainedLegal.keys : []),
+    currentLegalKey,
+    ...(activeLegalKey ? [activeLegalKey] : [])
+  ])];
   useEffect(() => {
     // Memory/Tools pages are not always wrapped by AppFrame; keep the product tour mounted at router level.
     const step = readWorkspaceGuidanceOverlay(typeof window === "undefined" ? undefined : window.sessionStorage);
@@ -234,15 +259,23 @@ export function AppRouter(props: { onRetry: () => void }) {
   return (
     <>
       {["/main", "/legal-diagnosis", "/tools", "/memory", "/memory-sources", "/settings", "/pet"].includes(state.navigation.currentPath) ? (
-        <RetainedRoute
-          key={JSON.stringify([
-            state.account.userId, state.bootstrap?.app.userMode,
-            ...(typeof window === "undefined" ? [] : [readLegalDiagnosisProjectContext(), readLegalDiagnosisPrompt(), readLegalDiagnosisSourceInput()])
-          ])}
-          active={state.navigation.currentPath === "/legal-diagnosis"}
-        >
-          <LaborDiagnosticPage />
-        </RetainedRoute>
+        <>
+          <RetainedRoute
+            active={state.navigation.currentPath === "/main"}
+            preserveEffects={activeInterviewRecording?.owner.kind === "agent"}
+          >
+            <HomePage />
+          </RetainedRoute>
+          {legalKeys.map((key) => (
+            <RetainedRoute
+              key={key}
+              active={state.navigation.currentPath === "/legal-diagnosis" && key === currentLegalKey}
+              preserveEffects={activeLegalKey === key}
+            >
+              <LaborDiagnosticPage />
+            </RetainedRoute>
+          ))}
+        </>
       ) : null}
       {renderRoute(state.navigation.currentPath)}
       {windowDragRegion}
@@ -355,7 +388,7 @@ function renderRoute(path: AppRoutePath) {
     case "/pet":
       return <PetPage />;
     case "/main":
-      return <HomePage />;
+      return null;
     case "/welcome":
     default:
       return <WelcomePage />;

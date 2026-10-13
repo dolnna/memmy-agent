@@ -31,7 +31,10 @@ function WorkflowHarness(props: {
   onOpenRecording?: () => void;
   onTranscriptReady?: (text: string) => void;
   onSources?: (items: LegalDiagSourceItem[]) => void;
-  onRecordingPreviewChange?: (state: LegalRecordingPreviewState) => void;
+  onRecordingPreviewChange?: (state: LegalRecordingPreviewState) => boolean | void;
+  sharedRecording?: Pick<LegalRecordingPreviewState, "mode" | "elapsedSeconds">;
+  onSharedRecordingPause?: () => void;
+  onSharedRecordingFinish?: () => void;
   finishError?: Error;
   uploadError?: Error;
   finishSegments?: LegalStructuredTranscriptSegment[];
@@ -115,6 +118,9 @@ function WorkflowHarness(props: {
       onTranscriptReady={(text) => props.onTranscriptReady?.(text)}
       onRecordingPreviewChange={props.onRecordingPreviewChange}
       onOpenRecording={props.onOpenRecording}
+      sharedRecording={props.sharedRecording}
+      onSharedRecordingPause={props.onSharedRecordingPause}
+      onSharedRecordingFinish={props.onSharedRecordingFinish}
       recordingControllerRef={props.controllerRef}
       onOpenArtifact={props.onOpenArtifact}
       composerDraft={draft}
@@ -574,6 +580,31 @@ describe("LaborDiagnosticWorkflow", () => {
     await act(async () => shortcut(container, "诊断指引").click());
     await act(async () => buttonByText(container, "我在现场，要录音").click());
     expect(container.querySelector(".legal-record-card")).not.toBeNull();
+  });
+
+  it("shows a recording from another conversation without starting a second one", async () => {
+    const pauseShared = vi.fn();
+    const finishShared = vi.fn();
+    await act(async () => {
+      root.render(
+        <I18nProvider language="zh-CN">
+          <WorkflowHarness
+            onPhase={(next) => { phase = next; }}
+            onRecorderCall={(name) => recorderCalls.push(name)}
+            sharedRecording={{ mode: "recording", elapsedSeconds: 87 }}
+            onSharedRecordingPause={pauseShared}
+            onSharedRecordingFinish={finishShared}
+          />
+        </I18nProvider>
+      );
+    });
+    expect(container.querySelector(".legal-record-card")?.textContent).toContain("01:27");
+    expect([...container.querySelectorAll(".legal-record-card button")].some((button) => button.textContent?.includes("开始录音"))).toBe(false);
+    expect(recorderCalls).not.toContain("start");
+    await act(async () => buttonByText(container, "暂停").click());
+    await act(async () => buttonByText(container, "结束并转写").click());
+    expect(pauseShared).toHaveBeenCalledOnce();
+    expect(finishShared).toHaveBeenCalledOnce();
   });
 
   it("preserves recordings and files when cards are changed or dismissed", async () => {

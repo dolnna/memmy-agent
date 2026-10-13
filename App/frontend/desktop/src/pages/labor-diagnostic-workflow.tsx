@@ -79,8 +79,12 @@ export interface LaborDiagnosticWorkflowProps {
   composerRecorder?: AsrRecorder;
   transcribeRecordingFile: (file: File) => Promise<AsrTranscriptionResponse>;
   onTranscriptReady: (transcript: string) => void;
-  onRecordingPreviewChange?: (state: LegalRecordingPreviewState) => void;
+  onRecordingPreviewChange?: (state: LegalRecordingPreviewState) => boolean | void;
   onOpenRecording?: () => void;
+  sharedRecording?: Pick<LegalRecordingPreviewState, "mode" | "elapsedSeconds">;
+  onSharedRecordingPause?: () => void;
+  onSharedRecordingResume?: () => void;
+  onSharedRecordingFinish?: () => void;
   recordingControllerRef?: MutableRefObject<LegalRecordingController | null>;
   onSourcesChange?: (items: LegalDiagSourceItem[]) => void;
   onOpenArtifact?: (path: string) => void;
@@ -226,13 +230,16 @@ export function LaborDiagnosticWorkflow(props: LaborDiagnosticWorkflowProps) {
 
   async function startRecording() {
     openCard("recording");
-    if (recordingBusy || uploadingRecording) {
+    if (recordingBusy || uploadingRecording || props.sharedRecording) {
       props.onOpenRecording?.();
       return;
     }
     setRecordingError("");
     setRecordSeconds(0);
-    props.onRecordingPreviewChange?.({ mode: "starting", elapsedSeconds: 0, transcript: "", transcriptSource: null });
+    if (props.onRecordingPreviewChange?.({ mode: "starting", elapsedSeconds: 0, transcript: "", transcriptSource: null }) === false) {
+      props.onOpenRecording?.();
+      return;
+    }
     try {
       await props.recorder.start();
     } catch (error) {
@@ -260,11 +267,18 @@ export function LaborDiagnosticWorkflow(props: LaborDiagnosticWorkflowProps) {
 
   async function uploadRecordingFile(file: File) {
     openCard("recording");
-    if (recordingBusy || uploadingRecording) return;
+    if (recordingBusy || uploadingRecording || props.sharedRecording) {
+      props.onOpenRecording?.();
+      return;
+    }
     setRecordingError("");
     setUploadingRecording(true);
     setRecordSeconds(0);
-    props.onRecordingPreviewChange?.({ mode: "transcribing", elapsedSeconds: 0, transcript: "", transcriptSource: null });
+    if (props.onRecordingPreviewChange?.({ mode: "transcribing", elapsedSeconds: 0, transcript: "", transcriptSource: null }) === false) {
+      setUploadingRecording(false);
+      props.onOpenRecording?.();
+      return;
+    }
     try {
       const result = await props.transcribeRecordingFile(file);
       const segments = readStructuredSegments(result);
@@ -905,10 +919,13 @@ export function LaborDiagnosticWorkflow(props: LaborDiagnosticWorkflowProps) {
   }
 
   function renderRecordingCard(): ReactNode {
-    const status = props.recorder.status;
+    const status = props.sharedRecording?.mode ?? props.recorder.status;
+    const elapsedSeconds = props.sharedRecording?.elapsedSeconds ?? recordSeconds;
     const recording = status === "recording";
     const paused = status === "paused";
-    const processing = props.recorder.isStarting || props.recorder.isTranscribing || uploadingRecording;
+    const processing = props.sharedRecording
+      ? status === "starting" || status === "transcribing"
+      : props.recorder.isStarting || props.recorder.isTranscribing || uploadingRecording;
     const label = uploadingRecording ? t("legalDiagnosis.recording.uploading")
       : recording || paused || processing ? recordingStatusLabel(status)
       : t("legalDiagnosis.shortcuts.recording");
@@ -919,7 +936,7 @@ export function LaborDiagnosticWorkflow(props: LaborDiagnosticWorkflowProps) {
             {processing ? <CircleDashed size={18} className="litrev-spin" /> : <Mic size={18} />}
           </span>
           <strong className="legal-record-strip__label" aria-live="polite">{label}</strong>
-          <time className="legal-record-strip__time">{formatDuration(recordSeconds)}</time>
+          <time className="legal-record-strip__time">{formatDuration(elapsedSeconds)}</time>
           <span className="legal-record-strip__wave" aria-hidden="true">
             {[4, 6, 10, 6, 14, 20, 12, 8, 18, 26, 16, 10, 22, 30, 18, 12, 24, 16, 8, 20, 26, 14, 10, 18, 12, 6, 10, 4].map((height, index) => (
               <i key={index} style={{ height, animationDelay: `${-index * 85}ms` }} />
@@ -931,10 +948,13 @@ export function LaborDiagnosticWorkflow(props: LaborDiagnosticWorkflowProps) {
             ) : null}
             {recording || paused ? (
               <>
-                <Button type="button" variant="secondary" size="sm" onClick={() => paused ? props.recorder.resume() : props.recorder.pause()}>
+                <Button type="button" variant="secondary" size="sm" onClick={() => paused
+                  ? props.sharedRecording ? props.onSharedRecordingResume?.() : props.recorder.resume()
+                  : props.sharedRecording ? props.onSharedRecordingPause?.() : props.recorder.pause()}>
                   {paused ? <Play size={13} /> : <Pause size={13} />}{t(paused ? "legalDiagnosis.recording.resume" : "legalDiagnosis.recording.pause")}
                 </Button>
-                <Button type="button" variant="primary" size="sm" onClick={() => void finishRecording()}>
+                <Button type="button" variant="primary" size="sm" onClick={() => props.sharedRecording
+                  ? props.onSharedRecordingFinish?.() : void finishRecording()}>
                   <Square size={12} />{t("legalDiagnosis.recording.finish")}
                 </Button>
               </>
@@ -1234,10 +1254,11 @@ export function LaborDiagnosticWorkflow(props: LaborDiagnosticWorkflowProps) {
     }
   }
 
-  function recordingStatusLabel(status: AsrRecorder["status"]): string {
+  function recordingStatusLabel(status: AsrRecorder["status"] | LegalRecordingPreviewState["mode"]): string {
     if (status === "recording") return t("legalDiagnosis.recording.recording");
     if (status === "paused") return t("legalDiagnosis.recording.paused");
     if (status === "transcribing") return t("legalDiagnosis.recording.transcribing");
+    if (status === "completed") return t("legalDiagnosis.recording.completed");
     if (status === "checkingPermission" || status === "requestingPermission" || status === "starting") return t("legalDiagnosis.recording.starting");
     return t("legalDiagnosis.recording.ready");
   }
