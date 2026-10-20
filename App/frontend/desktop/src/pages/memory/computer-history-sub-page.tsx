@@ -11,6 +11,7 @@ import type {
   MemmyAgentClient
 } from "../../api/memmy-agent-client.js";
 import { useTranslation } from "../../i18n/use-translation.js";
+import { isCreditsPreviewMode } from "../../app/credits-preview-mode.js";
 import { MemoryMarkdown } from "./memory-markdown.js";
 import { AppIcon } from "./app-icon.js";
 import { ScrollText, Trash2 } from "./memory-prototype-icons.js";
@@ -161,6 +162,7 @@ function Prose(props: { text: string }) {
 
 export function ComputerHistorySubPage(props: ComputerHistorySubPageProps) {
   const { t } = useTranslation();
+  const creditsPreview = isCreditsPreviewMode();
   const [snapshot, setSnapshot] = useState<ComputerHistorySnapshot | null>(null);
   const [pendingRecordingAction, setPendingRecordingAction] = useState<"start" | "resume" | null>(null);
   const [permissionSetup, setPermissionSetup] = useState(readHistoryPermissionSetup);
@@ -399,7 +401,7 @@ export function ComputerHistorySubPage(props: ComputerHistorySubPageProps) {
               role="status"
             >
               <span className="ch__recording-status-dot" aria-hidden="true" />
-              {t(quotaExhausted ? "computerHistory.tokensExhausted" : paused ? "computerHistory.paused" : "computerHistory.recording")}
+              {t(quotaExhausted && creditsPreview ? "credits.exhausted.title" : quotaExhausted ? "computerHistory.tokensExhausted" : paused ? "computerHistory.paused" : "computerHistory.recording")}
             </span>
           ) : null}
           <div className="ch__menu" ref={clearMenuRef}>
@@ -435,7 +437,7 @@ export function ComputerHistorySubPage(props: ComputerHistorySubPageProps) {
         </div>
       </div>
 
-      {quotaExhausted ? <p className="ch__quota-description">{t("computerHistory.tokensExhaustedDescription")}</p> : null}
+      {quotaExhausted ? <p className="ch__quota-description">{t(creditsPreview ? "credits.memory.paused" : "computerHistory.tokensExhaustedDescription")}</p> : null}
 
       {error ? <div className="ch__error" role="alert">{error}</div> : null}
       {refreshError ? <div className="ch__error" role="alert">{refreshError}</div> : null}

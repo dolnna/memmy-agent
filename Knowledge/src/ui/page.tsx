@@ -42,6 +42,13 @@ export interface KnowledgePageProps {
   connection: { baseUrl: string; localToken: string };
   language?: string;
   onSignIn?: () => void;
+  request?: (path: string, method?: string, body?: unknown, signal?: AbortSignal) => Promise<unknown>;
+  headerNotice?: ReactNode;
+  fileNotice?: ReactNode;
+  /** Optional presentation data until the service exposes per-base storage usage. */
+  storagePreview?: { byBase: Record<string, string>; totalUsed: string; totalLimit: string; exceeded: boolean };
+  /** Local presentation examples supplied by the host; omitted in the live page. */
+  limitPreview?: { kind: "sharing"; maxMembers?: number };
 }
 
 function sharedAccountLabel(member: KnowledgeMember, zh: boolean) {
@@ -240,6 +247,11 @@ export function KnowledgePage({
   connection,
   language = "zh",
   onSignIn,
+  request,
+  headerNotice,
+  fileNotice,
+  storagePreview,
+  limitPreview,
 }: KnowledgePageProps) {
   const zh = language.startsWith("zh");
   const t = (cn: string, en: string) => (zh ? cn : en);
@@ -253,10 +265,11 @@ export function KnowledgePage({
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [limitToast, setLimitToast] = useState(0);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameName, setRenameName] = useState("");
-  const [shareOpen, setShareOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(limitPreview?.kind === "sharing");
   const [revokeTarget, setRevokeTarget] = useState<KnowledgeMember | null>(null);
   const [fileDeleteTarget, setFileDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   const [page, setPage] = useState(1);
@@ -325,6 +338,7 @@ export function KnowledgePage({
         body?: unknown,
         signal?: AbortSignal,
       ): Promise<T> => {
+        if (request) return await request(path, method, body, signal) as T;
         const encoded = encodeLocalBody(body);
         const started = Date.now();
         let response: Response;
@@ -380,7 +394,7 @@ export function KnowledgePage({
         }
         return data as T;
       },
-    [connection.baseUrl, connection.localToken],
+    [connection.baseUrl, connection.localToken, request],
   );
   const acceptSettings = useCallback(
     (value: KnowledgeSettings, fallback: "first" | "none" = "first") => {
@@ -395,6 +409,11 @@ export function KnowledgePage({
     },
     [],
   );
+  useEffect(() => {
+    if (!limitToast) return;
+    const timer = setTimeout(() => setLimitToast(0), 4000);
+    return () => clearTimeout(timer);
+  }, [limitToast]);
   useEffect(() => {
     const controller = new AbortController();
     void api<KnowledgeSettings>(
@@ -881,6 +900,7 @@ export function KnowledgePage({
   }
   const active = settings?.bases.find((base) => base.id === activeId);
   const activeMembers = members.filter((member) => member.status === "ACTIVE");
+  const sharingPreviewFull = limitPreview?.kind === "sharing" && activeMembers.length + 1 >= (limitPreview.maxMembers ?? Infinity);
   const ownedBases = settings?.bases.filter((base) => !base.shared) ?? [];
   const maxBases = settings?.maxBases ?? 10;
   const sharedBases = settings?.bases.filter((base) => base.shared) ?? [];
@@ -1172,6 +1192,9 @@ export function KnowledgePage({
         <Cover />
         <div className="mk-kb-meta">
           <div className="mk-kb-name">{base.name}</div>
+          {!base.shared && storagePreview?.byBase[base.id] && (
+            <div className="mk-kb-sub">{t(`已用 ${storagePreview.byBase[base.id]}`, `${storagePreview.byBase[base.id]} used`)}</div>
+          )}
           {base.shared ? (
             <div className="mk-kb-sub">{t(`来自 ${base.ownerName || "其他用户"}`, `From ${base.ownerName || "another user"}`)}</div>
           ) : base.sharedByMe ? (
@@ -1192,20 +1215,28 @@ export function KnowledgePage({
         <div className="mk-side-head">
           <h2>{t("知识库", "Knowledge")}</h2>
         </div>
-        <button
-          type="button"
-          className="mk-new-btn"
-          disabled={!settings || !settings.serviceAvailable || quotaReached}
-          title={
-            quotaReached
-              ? t(`已达可创建上限（${ownedBases.length}/${maxBases}）`, `Limit reached (${ownedBases.length}/${maxBases})`)
-              : t("新建知识库", "New knowledge base")
-          }
-          onClick={() => setCreateOpen(true)}
-        >
-          <I d={IC.plus} size={14} />
-          {t("新建知识库", "New knowledge base")}
-        </button>
+        <div className="mk-new-wrap">
+          <button
+            type="button"
+            className="mk-new-btn"
+            disabled={!settings || !settings.serviceAvailable}
+            onClick={() => {
+              if (quotaReached) {
+                setLimitToast((value) => value + 1);
+                return;
+              }
+              setCreateOpen(true);
+            }}
+          >
+            <I d={IC.plus} size={14} />
+            {t("新建知识库", "New knowledge base")}
+          </button>
+          {limitToast > 0 && quotaReached && (
+            <div className="mk-limit-toast" key={limitToast} role="alert">
+              {t(`知识库数量已达上限（${ownedBases.length}/${maxBases}）`, `Knowledge base limit reached (${ownedBases.length}/${maxBases})`)}
+            </div>
+          )}
+        </div>
         {settings && settings.bases.length > 3 && (
           <div className="mk-side-search">
             <I d={IC.search} size={13} />
@@ -1246,9 +1277,14 @@ export function KnowledgePage({
         </div>
         {settings && settings.serviceAvailable && (
           <footer className="mk-side-foot">
-            <span className="mk-quota">
+            <span className={`mk-quota${quotaReached ? " mk-quota--exceeded" : ""}`}>
               {t(`可创建的知识库：${ownedBases.length}/${maxBases}`, `Knowledge bases: ${ownedBases.length}/${maxBases}`)}
             </span>
+            {storagePreview && (
+              <span className={`mk-quota mk-storage-quota${storagePreview.exceeded ? " mk-storage-quota--exceeded" : ""}`}>
+                {t(`总容量：${storagePreview.totalUsed}/${storagePreview.totalLimit}`, `Storage: ${storagePreview.totalUsed}/${storagePreview.totalLimit}`)}
+              </span>
+            )}
           </footer>
         )}
       </aside>
@@ -1478,6 +1514,7 @@ export function KnowledgePage({
                   )}
                 </div>
               </header>
+              {headerNotice}
               <input
                 ref={uploadInput}
                 type="file"
@@ -1727,6 +1764,7 @@ export function KnowledgePage({
                   );
                 }}
               >
+                {fileNotice}
                 {!searching && !listing ? (
                   <p className="mk-loading">{t("正在读取文件…", "Loading files…")}</p>
                 ) : !searching && !hasVisibleRows && !creatingFolder ? (
@@ -1957,7 +1995,7 @@ export function KnowledgePage({
       {/* ============ 创建知识库（仅名称） ============ */}
       {settings && createOpen && <div className="mk-modal-backdrop"><div className="mk-action-modal" role="dialog" aria-modal="true" aria-labelledby="mk-create-title"><button className="mk-modal-close" aria-label={t("关闭", "Close")} onClick={() => setCreateOpen(false)}><I d={IC.close} size={14} /></button><h2 id="mk-create-title">{t("创建个人知识库", "New knowledge base")}</h2><form onSubmit={(event) => { event.preventDefault(); const value = name.trim(); if (!value) return; void run(async () => { const before = new Set((settings?.bases ?? []).map((base) => base.id)); const next = await api<KnowledgeSettings>("/bases", "POST", { name: value }); acceptSettings(next); const created = next.bases.find((base) => !before.has(base.id)); if (created) setActiveId(created.id); setName(""); setCreateOpen(false); }); }}><label>{t("名称", "Name")}<NameField value={name} onChange={setName} placeholder={t("请输入知识库名称", "Knowledge base name")} /></label><div className="mk-modal-actions"><button type="button" onClick={() => setCreateOpen(false)}>{t("取消", "Cancel")}</button><button className="mk-primary" type="submit" disabled={!settings.serviceAvailable}>{t("确认创建", "Create")}</button></div></form></div></div>}
       {settings && renameOpen && active && <div className="mk-modal-backdrop"><div className="mk-action-modal" role="dialog" aria-modal="true" aria-labelledby="mk-rename-title"><button className="mk-modal-close" aria-label={t("关闭", "Close")} onClick={() => setRenameOpen(false)}><I d={IC.close} size={14} /></button><h2 id="mk-rename-title">{t("重命名知识库", "Rename knowledge base")}</h2><p>{t("新名称会同步给所有已共享的用户，对方刷新后即可看到。", "The new name syncs to everyone this base is shared with once they refresh.")}</p><form onSubmit={(event) => { event.preventDefault(); const value = renameName.trim(); if (!value || value === active.name) { setRenameOpen(false); return; } void run(async () => { acceptSettings(await api<KnowledgeSettings>(`/bases/${encodeURIComponent(active.id)}`, "PATCH", { name: value })); setRenameName(""); setRenameOpen(false); }); }}><label>{t("名称", "Name")}<NameField value={renameName} onChange={setRenameName} /></label><div className="mk-modal-actions"><button type="button" onClick={() => setRenameOpen(false)}>{t("取消", "Cancel")}</button><button className="mk-primary" type="submit" disabled={!renameName.trim() || renameName.trim() === active.name}>{t("保存", "Save")}</button></div></form></div></div>}
-      {settings && shareOpen && active && !active.shared && <div className="mk-modal-backdrop"><div className="mk-action-modal mk-share-modal" role="dialog" aria-modal="true" aria-labelledby="mk-share-title"><button className="mk-modal-close" aria-label={t("关闭", "Close")} onClick={() => { setShareOpen(false); setShareFailed(false); }}><I d={IC.close} size={14} /></button><h2 id="mk-share-title">{t("共享管理", "Sharing")}</h2><p className="mk-share-hint">{t("输入对方的 Memmy 用户 ID、手机号或邮箱即可共享此知识库。用户 ID 可在「账户」页面复制。被共享的用户可以查看文档并参与召回。", "Enter their Memmy user ID, phone number, or email. They can copy the user ID from the Account page. Shared users can view documents and use recall.")}</p><form className="mk-share-form" onSubmit={(event) => { event.preventDefault(); const userId = shareUserId.trim(); if (!userId) return; setShareFailed(false); void run(async () => { try { await api(`/bases/${encodeURIComponent(active.id)}/members`, "POST", { userId }); setShareUserId(""); const value = await api<{ members: KnowledgeMember[] }>(`/bases/${encodeURIComponent(active.id)}/members`); setMembers(value.members ?? []); acceptSettings(await api<KnowledgeSettings>("/settings")); } catch { setShareFailed(true); } }); }}><input value={shareUserId} onChange={(event) => { setShareUserId(event.target.value); setShareFailed(false); }} placeholder={t("输入用户 ID、手机号或邮箱", "User ID, phone, or email")} aria-label={t("用户 ID、手机号或邮箱", "User ID, phone, or email")} required /><button className="mk-primary" type="submit" disabled={!shareUserId.trim()}>{t("添加", "Add")}</button></form>{shareFailed ? <p className="mk-share-error" role="alert">{t("用户不存在", "User not found")}</p> : null}{activeMembers.length ? (<ul className="mk-members">{activeMembers.map((member) => (<li key={member.userId}><span className="mk-member-avatar" aria-hidden="true">{(member.name || "?").trim().charAt(0).toUpperCase()}</span><div className="mk-member-meta"><strong>{member.name}</strong>{member.contact && member.contact !== member.name ? <small>{member.contact}</small> : null}</div><button className="mk-member-revoke" type="button" onClick={() => setRevokeTarget(member)}>{t("移除", "Remove")}</button></li>))}</ul>) : (<p className="mk-share-empty">{t("暂未共享给其他用户。", "Not shared with anyone yet.")}</p>)}</div></div>}
+      {settings && shareOpen && active && !active.shared && <div className="mk-modal-backdrop"><div className="mk-action-modal mk-share-modal" role="dialog" aria-modal="true" aria-labelledby="mk-share-title"><button className="mk-modal-close" aria-label={t("关闭", "Close")} onClick={() => { setShareOpen(false); setShareFailed(false); }}><I d={IC.close} size={14} /></button><h2 id="mk-share-title">{sharingPreviewFull ? t("共享人数已达上限", "Sharing limit reached") : t("共享管理", "Sharing")}</h2>{!sharingPreviewFull && <p className="mk-share-hint">{t("输入对方的 Memmy 用户 ID、手机号或邮箱即可共享此知识库。用户 ID 可在「账户」页面复制。被共享的用户可以查看文档并参与召回。", "Enter their Memmy user ID, phone number, or email. They can copy the user ID from the Account page. Shared users can view documents and use recall.")}</p>}{sharingPreviewFull && <p>{t(`当前知识库最多支持 ${limitPreview?.maxMembers ?? 5} 人共享。移除成员后可继续添加。`, `This knowledge base allows up to ${limitPreview?.maxMembers ?? 5} people. Remove a member to add another.`)}</p>}{!sharingPreviewFull && <form className="mk-share-form" onSubmit={(event) => { event.preventDefault(); const userId = shareUserId.trim(); if (!userId || sharingPreviewFull) return; setShareFailed(false); void run(async () => { try { await api(`/bases/${encodeURIComponent(active.id)}/members`, "POST", { userId }); setShareUserId(""); const value = await api<{ members: KnowledgeMember[] }>(`/bases/${encodeURIComponent(active.id)}/members`); setMembers(value.members ?? []); acceptSettings(await api<KnowledgeSettings>("/settings")); } catch { setShareFailed(true); } }); }}><input value={shareUserId} onChange={(event) => { setShareUserId(event.target.value); setShareFailed(false); }} placeholder={t("输入用户 ID、手机号或邮箱", "User ID, phone, or email")} aria-label={t("用户 ID、手机号或邮箱", "User ID, phone, or email")} required /><button className="mk-primary" type="submit" disabled={!shareUserId.trim()}>{t("添加", "Add")}</button></form>}{shareFailed ? <p className="mk-share-error" role="alert">{t("用户不存在", "User not found")}</p> : null}{activeMembers.length ? (<ul className="mk-members">{activeMembers.map((member) => (<li key={member.userId}><span className="mk-member-avatar" aria-hidden="true">{(member.name || "?").trim().charAt(0).toUpperCase()}</span><div className="mk-member-meta"><strong>{member.name}</strong>{member.contact && member.contact !== member.name ? <small>{member.contact}</small> : null}</div><button className="mk-member-revoke" type="button" onClick={() => setRevokeTarget(member)}>{t("移除", "Remove")}</button></li>))}</ul>) : (<p className="mk-share-empty">{t("暂未共享给其他用户。", "Not shared with anyone yet.")}</p>)}{sharingPreviewFull && <div className="mk-modal-actions"><button type="button" onClick={() => { setShareOpen(false); setShareFailed(false); }}>{t("关闭", "Close")}</button></div>}</div></div>}
       {revokeTarget && active && <div className="mk-modal-backdrop"><div className="mk-action-modal" role="dialog" aria-modal="true" aria-labelledby="mk-revoke-title"><button className="mk-modal-close" aria-label={t("关闭", "Close")} onClick={() => setRevokeTarget(null)}><I d={IC.close} size={14} /></button><h2 id="mk-revoke-title">{t("取消分享", "Unshare knowledge base")}</h2><p>{t(`确定取消与“${sharedAccountLabel(revokeTarget, true)}”的共享吗？对方刷新后将无法继续访问此知识库。`, `Unshare this knowledge base from “${sharedAccountLabel(revokeTarget, false)}”? They will lose access after refreshing.`)}</p><div className="mk-modal-actions"><button type="button" onClick={() => setRevokeTarget(null)}>{t("取消", "Cancel")}</button><button className="mk-danger" type="button" onClick={() => { const target = revokeTarget; void run(async () => { await api(`/bases/${encodeURIComponent(active.id)}/members/${encodeURIComponent(target.userId)}`, "DELETE"); setMembers((current) => current.filter((item) => item.userId !== target.userId)); setRevokeTarget(null); acceptSettings(await api<KnowledgeSettings>("/settings")); }); }}>{t("确认取消分享", "Unshare")}</button></div></div></div>}
       {deleteOpen && active && <div className="mk-modal-backdrop"><div className="mk-action-modal" role="dialog" aria-modal="true" aria-labelledby="mk-delete-title"><button className="mk-modal-close" aria-label={t("关闭", "Close")} onClick={() => setDeleteOpen(false)}><I d={IC.close} size={14} /></button><h2 id="mk-delete-title">{t("删除知识库", "Delete knowledge base")}</h2><p>{t("彻底删除此知识库及全部文件？删除后无法恢复。", "Permanently delete this knowledge base and all its files? This cannot be undone.")}</p><div className="mk-modal-actions"><button type="button" onClick={() => setDeleteOpen(false)}>{t("取消", "Cancel")}</button><button className="mk-danger" type="button" onClick={confirmDeleteActive}>{t("确认删除", "Delete")}</button></div></div></div>}
       {fileDeleteTarget && active && <div className="mk-modal-backdrop"><div className="mk-action-modal" role="dialog" aria-modal="true" aria-labelledby="mk-file-delete-title"><button className="mk-modal-close" aria-label={t("关闭", "Close")} onClick={() => setFileDeleteTarget(null)}><I d={IC.close} size={14} /></button><h2 id="mk-file-delete-title">{t("删除文件", "Delete file")}</h2><p>{t(`从云端删除“${fileDeleteTarget.name}”？此操作也会影响该知识库的其他使用方。`, `Delete “${fileDeleteTarget.name}” from the cloud? This also affects other users of this knowledge base.`)}</p><div className="mk-modal-actions"><button type="button" onClick={() => setFileDeleteTarget(null)}>{t("取消", "Cancel")}</button><button className="mk-danger" type="button" onClick={confirmDeleteFile}>{t("确认删除", "Delete")}</button></div></div></div>}
@@ -2101,6 +2139,9 @@ const styles = `
 .mk-side-head h2{font-size:15px;font-weight:800;margin:0}
 .memmy-knowledge .mk-new-btn{display:flex;align-items:center;justify-content:center;gap:6px;width:calc(100% - 24px);margin:2px 12px 10px;padding:8px 12px;border:1px solid var(--mk-line-strong);border-radius:8px;background:#fff;font-size:13px;font-weight:700;color:var(--mk-sub)}
 .memmy-knowledge .mk-new-btn:hover:not(:disabled){border-color:var(--mk-accent);color:var(--mk-accent-deep);background:var(--mk-accent-tint)}
+.mk-new-wrap{position:relative}
+.mk-limit-toast{position:fixed;z-index:10003;top:8px;left:50%;transform:translateX(-50%);display:inline-flex;align-items:center;gap:8px;width:max-content;max-width:calc(100vw - 32px);padding:9px 14px;border:1px solid color-mix(in srgb,var(--mk-line-strong) 72%,transparent);border-radius:12px;background:color-mix(in srgb,#fff 96%,var(--mk-side));box-shadow:0 8px 24px rgba(27,42,39,.1);color:var(--mk-ink);font-size:12px;font-weight:500;line-height:18px;pointer-events:none}
+.mk-limit-toast::before{content:"";flex:none;width:6px;height:6px;border-radius:50%;background:var(--mk-err)}
 .mk-side-search{display:flex;align-items:center;gap:6px;margin:2px 12px 8px;padding:5px 9px;background:#fff;border:1px solid var(--mk-line);border-radius:8px;color:var(--mk-ter)}
 .mk-side-search input{border:0;padding:2px 0;font-size:12px;background:transparent}
 .mk-side-search input:focus-visible{outline:none;box-shadow:none;border:0}
@@ -2120,6 +2161,9 @@ const styles = `
 .mk-recall-dot{width:5px;height:5px;border-radius:50%;background:var(--mk-accent);flex-shrink:0}
 .mk-side-foot{padding:10px 16px}
 .mk-quota{font-size:11.5px;color:var(--mk-ter)}
+.mk-quota--exceeded{color:var(--mk-err);font-weight:700}
+.mk-storage-quota{display:block;margin-top:4px}
+.mk-storage-quota--exceeded{color:var(--mk-err);font-weight:700}
 
 /* ---------- 主内容区 ---------- */
 .mk-main{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;overflow-y:auto;padding-top:var(--codex-toolbar-height,46px)}

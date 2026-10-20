@@ -407,6 +407,7 @@ export function MemoriesSubPage(props: MemoriesSubPageProps) {
 }
 
 export interface MemoriesSubPageViewProps {
+  notice?: ReactNode;
   state: RemoteData<PanelItemsOutput> | ({ status: "ready"; data: PanelItemsOutput; detail: DetailState });
   detail?: DetailState;
   query: string;
@@ -440,6 +441,7 @@ export function MemoriesSubPageView(props: MemoriesSubPageViewProps) {
         </div>
         <MemoryRefreshButton onClick={props.onRefresh} />
       </div>
+      {props.notice}
       <div className="memory-toolbar">
         <div className="memory-source-search-control">
           <label className="memory-search">
