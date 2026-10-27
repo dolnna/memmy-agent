@@ -27,19 +27,15 @@ beforeEach(() => {
 afterEach(() => {act(() => root.unmount());document.body.replaceChildren();vi.useRealTimers();});
 
 describe("balance hierarchy", () => {
-  it("shows all three sample balances, named rewards and exhausted batches without reseeding on refresh", () => {
+  it("shows both sample balances, named rewards and exhausted batches without reseeding on refresh", () => {
     const account = createCreditDemo(now);
     account.buckets[0]!.remaining = 824.75;
     const sample = populateCreditDemo(account);
     expect(populateCreditDemo(sample)).toEqual(sample);
-    expect(describeCreditPool(sample, now)).toMatchObject({ planRemaining: 824.75, purchaseRemaining: 6125.5, rewardRemaining: 732.25, totalRemaining: 7682.5 });
+    expect(describeCreditPool(sample, now)).toMatchObject({ planRemaining: 824.75, rewardRemaining: 732.25, totalRemaining: 1557 });
     writeCreditDemo(sample);mount();
-    expect(host.textContent).toContain('7,682.50');
-    const purchase = card('购买积分');
+    expect(host.textContent).toContain('1,557.00');
     const reward = card('平台奖励积分');
-    expect(purchase.querySelectorAll('[role="progressbar"]')).toHaveLength(1);
-    expect(purchase.textContent).toContain('最近到期时间');
-    expect(purchase.textContent).not.toContain('长期有效');
     expect(reward.querySelectorAll('[role="progressbar"]')).toHaveLength(1);
     expect(reward.textContent).toContain('最近到期时间');
     expect(reward.textContent).not.toContain('32.25 积分');
@@ -66,29 +62,17 @@ describe("balance hierarchy", () => {
     expect(host.querySelector('[aria-live="polite"]')?.textContent).toBe('1 / 1');
     switchPeriod('valid');
     expect(host.querySelector('[aria-live="polite"]')?.textContent).toBe('1 / 1');
-    act(() => root.render(<AppProviders><CreditsSourceDetailPage source="purchase" /></AppProviders>));
-    expect(grants('购买积分')).toHaveLength(4);
-    expect(grants('购买积分')[0]?.textContent).toContain('购买积分');
-    expect(grants('购买积分')[0]?.textContent).toContain('到期时间');
-    expect(grants('购买积分')[0]?.textContent).toContain('已使用 0.00 / 5,000.00');
-    expect(grants('购买积分')[1]?.textContent).toContain('到期时间');
-    expect(grants('购买积分')[0]?.textContent).not.toContain('购买时间');
-    expect(grants('购买积分')[0]?.textContent).not.toContain('长期有效');
-    expect(host.textContent).toContain('已使用 1,000.00 / 1,000.00');
-    switchPeriod('expired');
-    expect(card('已过期').textContent).toContain('失效积分');
     expect(readCreditDemo()).toEqual(sample);
   });
 
   it("shows one total with source summaries, and doesn't duplicate the plan deadline", () => {
     const account=createCreditDemo(now);account.buckets[0]!.remaining=825;
-    account.buckets.push(grant('checkin:2026-10-15','reward',100,20),grant('pack','purchase',200,null));
+    account.buckets.push(grant('checkin:2026-10-15','reward',100,20));
     writeCreditDemo(account);mount();
-    expect(host.textContent).toContain('1,125.00');
+    expect(host.textContent).toContain('925.00');
     expect(balance('套餐积分')).toBe('825.00');
     expect(balance('平台奖励积分')).toBe('100.00');
-    expect(balance('购买积分')).toBe('200.00');
-    for (const source of ['套餐积分','平台奖励积分','购买积分']) {
+    for (const source of ['套餐积分','平台奖励积分']) {
       expect(card(source).textContent).not.toContain('剩余');
     }
     expect(card('套餐积分').textContent).toContain('下次刷新时间');
@@ -96,16 +80,14 @@ describe("balance hierarchy", () => {
     expect(card('套餐积分').querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow')).toBe('18');
     expect(card('平台奖励积分').textContent).not.toContain('签到奖励');
     const actions=[...host.querySelectorAll('button')].map(b=>b.textContent?.trim());
-    expect(actions).toEqual(expect.arrayContaining(['升级套餐','购买更多积分','兑换码']));
+    expect(actions).toEqual(expect.arrayContaining(['申请升级','兑换码']));
     expect(card('平台奖励积分').querySelectorAll('button')).toHaveLength(1);
-    expect(card('购买积分').querySelectorAll('button')).toHaveLength(2);
-    expect(host.querySelectorAll('dl dt')).toHaveLength(3);
+    expect(host.querySelectorAll('dl dt')).toHaveLength(2);
   });
 
   it("keeps empty sources compact and does not invent grants", () => {
     writeCreditDemo(createCreditDemo(now));mount();
     expect(card('平台奖励积分').textContent).toContain('暂无奖励积分');
-    expect(card('购买积分').textContent).toContain('暂无购买积分');
     expect(card('平台奖励积分').querySelector('[role="progressbar"]')).toBeNull();
   });
 

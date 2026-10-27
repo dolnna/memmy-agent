@@ -1,9 +1,9 @@
 /** Shared preview balance so the sidebar menu and the credits pages show the same numbers. */
-import { creditErrorScenario, creditRenewalScenario } from "./credits-preview-mode.js";
+import { creditErrorScenario } from "./credits-preview-mode.js";
 
 export type CreditPlan = "free" | "pro";
 
-export type CreditSource = "plan" | "reward" | "purchase";
+export type CreditSource = "plan" | "reward";
 export type CreditBucket = {
   id: string;
   source: CreditSource;
@@ -15,45 +15,30 @@ export type CreditBucket = {
 };
 
 export type CreditDemoState = {
-  version: 2;
-  balanceSampleVersion?: 1 | 2 | 3 | 4;
+  version: 3;
+  balanceSampleVersion?: 1 | 2 | 3 | 4 | 5;
   plan: CreditPlan;
   cycleAnchor: string;
   cycleIndex: number;
-  paidUntil: string | null;
   ledgerAnchor: string;
   buckets: CreditBucket[];
   lastClaimDate: string | null;
   streak: number;
   cycles: number;
   bonus: number;
-  autoRenew: boolean;
   checkedIn: boolean;
 };
 
 const DEMO_KEY = "memmy.creditsPreview.demo";
-function demoStorageKey() { const scenario=creditRenewalScenario(); const error=creditErrorScenario(); const params=typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null; const plan=params?.get("credits-plan") === "pro" ? "pro" : "free"; const recovered=error === "agent" && params?.get("credits-recovered") === "1" ? "-recovered" : ""; return error ? `${DEMO_KEY}:error-${error}-${plan}${recovered}` : scenario ? `${DEMO_KEY}:${scenario}` : DEMO_KEY; }
+function demoStorageKey() {
+  const error = creditErrorScenario();
+  const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+  const plan = params?.get("credits-plan") === "pro" ? "pro" : "free";
+  const recovered = error === "agent" && params?.get("credits-recovered") === "1" ? "-recovered" : "";
+  return error ? `${DEMO_KEY}:error-${error}-${plan}${recovered}` : plan === "pro" ? `${DEMO_KEY}:pro` : DEMO_KEY;
+}
 export const CREDIT_DEMO_EVENT = "memmy:credits-preview-changed";
 export const CREDIT_GRANTS: Record<CreditPlan, number> = { free: 1000, pro: 5000 };
-export const CREDIT_PACKS = [
-  { credits: 200, cny: 5, usd: 0.99 },
-  { credits: 1000, cny: 25, usd: 4.99 },
-  { credits: 5000, cny: 125, usd: 24.99 }
-] as const;
-/** Shared display-only orders and balances for the populated preview scenario. */
-export const CREDIT_PACK_ORDERS = [
-  { id: "sample-pack-5", daysAgo: 1, pack: 1000, channel: "alipay", status: "completed", remaining: 1000 },
-  { id: "sample-pack-4", daysAgo: 4, pack: 200, channel: "wechat", status: "completed", remaining: 125.5 },
-  { id: "sample-pack-3", daysAgo: 8, pack: 5000, channel: "alipay", status: "closed", remaining: 0 },
-  { id: "sample-pack-2", daysAgo: 12, pack: 1000, channel: "wechat", status: "completed", remaining: 0 },
-  { id: "sample-pack-1", daysAgo: 19, pack: 200, channel: "alipay", status: "closed", remaining: 0 },
-  { id: "sample-pack-0", daysAgo: 23, pack: 5000, channel: "alipay", status: "completed", remaining: 5000 },
-  { id: "sample-pack-expired", daysAgo: 135, pack: 200, channel: "wechat", status: "completed", remaining: 80 }
-] as const;
-export const CREDIT_PURCHASE_VALIDITY_DAYS = 90;
-export function creditPurchaseExpiresAt(grantedAt: string): string {
-  return new Date(Date.parse(grantedAt) + CREDIT_PURCHASE_VALIDITY_DAYS * 24 * 60 * 60 * 1000).toISOString();
-}
 export const CHECKIN_DAILY = 100;
 export const CHECKIN_REWARD = CHECKIN_DAILY;
 export const INVITE_TOKENS_PER_CREDIT = 1_000_000;
@@ -95,22 +80,9 @@ function planBucket(plan: CreditPlan, anchor: string, index: number): CreditBuck
 export function createCreditDemo(now = new Date()): CreditDemoState {
   const anchor = now.toISOString();
   return {
-    version: 2, balanceSampleVersion: 4, plan: "free", cycleAnchor: anchor, cycleIndex: 0, paidUntil: null,
+    version: 3, balanceSampleVersion: 5, plan: "free", cycleAnchor: anchor, cycleIndex: 0,
     ledgerAnchor: anchor, buckets: [planBucket("free", anchor, 0)],
-    lastClaimDate: null, streak: 0, cycles: 0, bonus: 0, autoRenew: false, checkedIn: false
-  };
-}
-
-/** Explicit, isolated UI examples. No checkout action calls this function. */
-export function createRenewalCreditDemo(now: Date, renewed = false): CreditDemoState {
-  const opened = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0);
-  const demo = previewCreditPlan(createCreditDemo(opened), "pro", opened);
-  return { ...demo, ledgerAnchor: now.toISOString(),
-    paidUntil: creditAnniversary(opened.toISOString(), renewed ? 2 : 1).toISOString(),
-    buckets: [
-      { ...demo.buckets[0]!, remaining: 3200 },
-      { id:"renewal-example-reward", source:"reward", granted:200, remaining:200, grantedAt:opened.toISOString(), expiresAt:creditAnniversary(opened.toISOString(),1).toISOString() }
-    ]
+    lastClaimDate: null, streak: 0, cycles: 0, bonus: 0, checkedIn: false
   };
 }
 
@@ -139,13 +111,9 @@ export function consumeCreditBuckets(buckets: CreditBucket[], credits: number, n
   return { buckets: next, charged: amount(cents(credits) - needed), uncovered: amount(needed) };
 }
 
-/** At a new cycle, discard the old plan bucket; rewards/purchases keep their own expiry. */
+/** At a new cycle, discard the old plan bucket; rewards keep their own expiry. */
 export function advanceCreditCycle(demo: CreditDemoState, now = new Date()): CreditDemoState {
   let next = demo;
-  if (next.plan === "pro" && next.paidUntil && Date.parse(next.paidUntil) <= now.getTime()) {
-    // Preview never invents an automatic payment. Only paid periods retain Pro rights.
-    next = { ...next, plan: "free", cycleAnchor: next.paidUntil, cycleIndex: -1, paidUntil: null, autoRenew: false };
-  }
   const cycle = creditCycleWindow(next, now);
   if (cycle.index !== next.cycleIndex) {
     next = { ...next, cycleIndex: cycle.index, buckets: [
@@ -156,13 +124,13 @@ export function advanceCreditCycle(demo: CreditDemoState, now = new Date()): Cre
   return next;
 }
 
-/** Explicit scenario control, never used by the payment confirmation button. */
+/** Explicit scenario control, never used by the application link. */
 export function previewCreditPlan(demo: CreditDemoState, plan: CreditPlan, now = new Date()): CreditDemoState {
   const next = advanceCreditCycle(demo, now);
+  if (next.plan === plan) return next;
   const anchor = now.toISOString();
   return {
-    ...next, plan, cycleAnchor: anchor, cycleIndex: 0, autoRenew: false,
-    paidUntil: plan === "pro" ? creditAnniversary(anchor, 1).toISOString() : null,
+    ...next, plan, cycleAnchor: anchor, cycleIndex: 0,
     buckets: [...next.buckets.filter(bucket => bucket.source !== "plan"), planBucket(plan, anchor, 0)]
   };
 }
@@ -179,18 +147,7 @@ export function populateCreditDemo(demo: CreditDemoState): CreditDemoState {
     value.setDate(value.getDate() + days);
     return value.toISOString();
   };
-  const purchaseExamples: CreditBucket[] = import.meta.env.MEMMY_APP_EDITION === "intl" ? [] : [
-    ...CREDIT_PACK_ORDERS.filter(order => order.status === "completed").map(order => ({
-      id: order.id, source: "purchase" as const, granted: order.pack, remaining: order.remaining,
-      grantedAt: date(-order.daysAgo), expiresAt: creditPurchaseExpiresAt(date(-order.daysAgo))
-    })),
-    ...Array.from({ length: 3 }, (_, index): CreditBucket => ({
-      id: `sample-pack-expired-older-${index}`, source: "purchase", granted: 200, remaining: 20 * (index + 1),
-      grantedAt: date(-100 - index * 30), expiresAt: creditPurchaseExpiresAt(date(-100 - index * 30))
-    })),
-  ];
   const examples: CreditBucket[] = [
-    ...purchaseExamples,
     { id: "redeem:sample-expired", source: "reward", granted: 500, remaining: 180, grantedAt: date(-40), expiresAt: date(-10) },
     { id: "checkin:sample-expired-used", source: "reward", granted: 100, remaining: 0, grantedAt: date(-35), expiresAt: date(-5) },
     { id: "checkin:sample-recent", source: "reward", granted: 100, remaining: 32.25, grantedAt: date(-1), expiresAt: date(2) },
@@ -198,7 +155,7 @@ export function populateCreditDemo(demo: CreditDemoState): CreditDemoState {
     { id: "history:sample", source: "reward", granted: 200, remaining: 200, grantedAt: date(-20), expiresAt: null },
     { id: "checkin:sample-used", source: "reward", granted: 100, remaining: 0, grantedAt: date(-6), expiresAt: date(1) }
   ];
-  return examples.reduce(grantPreviewCredits, { ...demo, balanceSampleVersion: 4 as const });
+  return examples.reduce(grantPreviewCredits, { ...demo, balanceSampleVersion: 5 as const });
 }
 
 function invitedPreviewBuckets(anchor: string): CreditBucket[] {
@@ -321,9 +278,6 @@ export type CreditPool = {
   rewardGranted: number;
   rewardUsed: number;
   rewardRemaining: number;
-  purchaseGranted: number;
-  purchaseUsed: number;
-  purchaseRemaining: number;
   totalRemaining: number;
   remainingPercent: number;
   buckets: CreditBucket[];
@@ -337,15 +291,12 @@ export function describeCreditPool(demo: CreditDemoState = readCreditDemo(), now
   const planRemaining = sum("plan", "remaining");
   const rewardGranted = sum("reward", "granted");
   const rewardRemaining = sum("reward", "remaining");
-  const purchaseGranted = sum("purchase", "granted");
-  const purchaseRemaining = sum("purchase", "remaining");
   const grant = CREDIT_GRANTS[current.plan];
-  const totalRemaining = amount(cents(planRemaining) + cents(rewardRemaining) + cents(purchaseRemaining));
-  const capacity = grant + rewardGranted + purchaseGranted;
+  const totalRemaining = amount(cents(planRemaining) + cents(rewardRemaining));
+  const capacity = grant + rewardGranted;
   return {
     plan: current.plan, grant, planUsed: amount(cents(grant) - cents(planRemaining)), planRemaining,
     rewardGranted, rewardUsed: amount(cents(rewardGranted) - cents(rewardRemaining)), rewardRemaining,
-    purchaseGranted, purchaseUsed: amount(cents(purchaseGranted) - cents(purchaseRemaining)), purchaseRemaining,
     totalRemaining, remainingPercent: capacity > 0 ? Math.round(totalRemaining / capacity * 100) : 0, buckets
   };
 }
@@ -434,7 +385,7 @@ function dayKeyOrNull(value: unknown): string | null {
 function validBucket(value: unknown): value is CreditBucket {
   if (!value || typeof value !== "object") return false;
   const b = value as CreditBucket;
-  return typeof b.id === "string" && ["plan", "reward", "purchase"].includes(b.source)
+  return typeof b.id === "string" && ["plan", "reward"].includes(b.source)
     && Number.isFinite(b.granted) && b.granted >= 0 && Number.isFinite(b.remaining)
     && b.remaining >= 0 && b.remaining <= b.granted && Number.isFinite(Date.parse(b.grantedAt))
     && (b.expiresAt === null || Number.isFinite(Date.parse(b.expiresAt)));
@@ -458,24 +409,21 @@ export function readCreditDemo(now: Date = new Date()): CreditDemoState {
       raw = JSON.stringify(example);
       window.sessionStorage.setItem(key, raw);
     }
-    const scenario = creditRenewalScenario();
-    if (!raw && scenario) {
-      raw = JSON.stringify({
-        ...createRenewalCreditDemo(now, scenario === "prepaid-next" || scenario === "renewal-success"),
-        autoRenew: scenario === "auto-renew"
-      });
-      window.sessionStorage.setItem(key,raw);
-    }
-    const value = JSON.parse(raw ?? "null") as Partial<CreditDemoState> & { claims?: number } | null;
+    const requestedPro = new URLSearchParams(window.location.search).get("credits-plan") === "pro";
+    if (!raw && requestedPro) raw = JSON.stringify(previewCreditPlan(base, "pro", now));
+    const value = JSON.parse(raw ?? "null") as (Partial<Omit<CreditDemoState, "version">> & { version?: number; claims?: number }) | null;
     let next: CreditDemoState;
-    if (value?.version === 2 && Number.isFinite(Date.parse(value.cycleAnchor ?? ""))
+    if ((value?.version === 2 || value?.version === 3) && Number.isFinite(Date.parse(value.cycleAnchor ?? ""))
       && Number.isFinite(Date.parse(value.ledgerAnchor ?? "")) && Array.isArray(value.buckets)
-      && value.buckets.every(validBucket) && (value.plan === "free" || value.plan === "pro")
-      && Number.isInteger(value.cycleIndex) && value.cycleIndex! >= 0
-      && (value.plan === "free" || Number.isFinite(Date.parse(value.paidUntil ?? "")))) {
-      next = { ...base, ...value } as CreditDemoState;
+      && (value.plan === "free" || value.plan === "pro")
+      && Number.isInteger(value.cycleIndex) && value.cycleIndex! >= 0) {
+      // Retain existing plan/reward usage while removing retired commerce preview data.
+      next = { ...base, plan: value.plan, cycleAnchor: value.cycleAnchor!, cycleIndex: value.cycleIndex!,
+        ledgerAnchor: value.ledgerAnchor!, buckets: value.buckets.filter(validBucket),
+        balanceSampleVersion: value.balanceSampleVersion,
+        lastClaimDate: dayKeyOrNull(value.lastClaimDate), streak: Math.max(0, Number(value.streak) || 0),
+        cycles: Math.max(0, Number(value.cycles) || 0), bonus: Math.max(0, Number(value.bonus) || 0) };
     } else {
-      // Migrate the earlier preview without using its old 8,000-credit entitlement.
       next = value?.plan === "pro" ? previewCreditPlan(base, "pro", now) : base;
       const bonus = Number.isFinite(value?.bonus) ? Math.max(0, value!.bonus!) : 0;
       if (bonus > 0) next = grantPreviewCredits(next, {
@@ -485,18 +433,12 @@ export function readCreditDemo(now: Date = new Date()): CreditDemoState {
       next = { ...next, bonus,
         lastClaimDate: dayKeyOrNull(value?.lastClaimDate) ?? (value?.checkedIn ? formatDayKey(now) : null),
         streak: Math.max(0, Number(value?.streak ?? value?.claims) || 0),
-        cycles: Math.max(0, Number(value?.cycles) || 0), autoRenew: value?.autoRenew === true,
+        cycles: Math.max(0, Number(value?.cycles) || 0),
         buckets: consumeCreditBuckets(next.buckets, CREDIT_USED, now).buckets
       };
     }
-    if (value?.balanceSampleVersion !== 4) {
-      // Rebuild only the old display-only purchase samples so every batch follows the 90-day rule.
-      next = { ...next, buckets: next.buckets.filter(bucket => !bucket.id.startsWith("sample-pack")) };
-      next = populateCreditDemo(next);
-    }
-    next = { ...next, buckets: next.buckets.map(bucket => bucket.source === "purchase"
-      ? { ...bucket, expiresAt: creditPurchaseExpiresAt(bucket.grantedAt) }
-      : bucket) };
+    if (!errorScenario && ![4, 5].includes(value?.balanceSampleVersion ?? 0)) next = populateCreditDemo(next);
+    next.balanceSampleVersion = 5;
     const invitedPreview = new URLSearchParams(window.location.search).get("credits-invited") === "1";
     next = { ...next, buckets: next.buckets.filter(bucket => invitedPreview
       ? bucket.id !== "invite:sample" && !bucket.id.startsWith("invite:sample-expired-older")
@@ -507,10 +449,7 @@ export function readCreditDemo(now: Date = new Date()): CreditDemoState {
         : bucket) };
       next = invitedPreviewBuckets(next.ledgerAnchor).reduce(grantPreviewCredits, next);
     }
-    // Keep the failed-renewal example consistent when loading older preview sessions.
-    if (scenario === "renewal-failed") next = { ...next, autoRenew: false };
     next = advanceCreditCycle(next, now);
-    if (import.meta.env.MEMMY_APP_EDITION === "intl") next = { ...next, buckets: next.buckets.filter(bucket => bucket.source !== "purchase") };
     next.checkedIn = next.lastClaimDate === formatDayKey(now);
     const serialized = JSON.stringify(next);
     if (raw !== serialized) window.sessionStorage.setItem(key, serialized);

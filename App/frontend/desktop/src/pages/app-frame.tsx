@@ -1674,10 +1674,10 @@ export function AppFrame(props: AppFrameProps) {
             </div>
           </div>
           <div className="app-frame-sidebar-menu__divider" />
-          {creditQuota.plan !== "pro" && (
+          {(
             <button type="button" className="app-frame-sidebar-menu__item app-frame-sidebar-menu__quota-upgrade" role="menuitem" onClick={openCreditPlans}>
               <span className="app-frame-sidebar-menu__item-icon"><ArrowUpRight size={13} /></span>
-              <span className="app-frame-sidebar-menu__item-label">{t("credits.balance.upgrade")}</span>
+              <span className="app-frame-sidebar-menu__item-label">{t(creditQuota.plan === "pro" ? "credits.balance.managePlan" : "credits.balance.upgrade")}</span>
             </button>
           )}
           <button type="button" className="app-frame-sidebar-menu__item" role="menuitem" onClick={openSettingsFromAccountMenu}>

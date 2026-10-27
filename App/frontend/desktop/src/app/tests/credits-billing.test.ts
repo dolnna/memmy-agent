@@ -31,11 +31,10 @@ describe("monthly credit cycles", () => {
     let account = createCreditDemo(date(10, 15));
     account.buckets[0]!.remaining = 300;
     account = grantPreviewCredits(account, bucket("reward", "reward", 200, null));
-    account = grantPreviewCredits(account, bucket("pack", "purchase", 500, null));
     const renewed = advanceCreditCycle(account, date(11, 15));
-    expect(describeCreditPool(renewed, date(11, 15)).totalRemaining).toBe(1700);
+    expect(describeCreditPool(renewed, date(11, 15)).totalRemaining).toBe(1200);
     const later = advanceCreditCycle(renewed, new Date(2027, 2, 16, 12));
-    expect(describeCreditPool(later, new Date(2027, 2, 16, 12)).totalRemaining).toBe(1700);
+    expect(describeCreditPool(later, new Date(2027, 2, 16, 12)).totalRemaining).toBe(1200);
     expect(advanceCreditCycle(later, new Date(2027, 2, 16, 12))).toBe(later);
   });
 
@@ -43,20 +42,38 @@ describe("monthly credit cycles", () => {
     let account = createCreditDemo(date(10, 1));
     account.buckets[0]!.remaining = 300;
     account = grantPreviewCredits(account, bucket("reward", "reward", 200, null));
-    account = grantPreviewCredits(account, bucket("pack", "purchase", 500, null));
     const upgraded = previewCreditPlan(account, "pro", date(10, 15));
-    expect(describeCreditPool(upgraded, date(10, 15)).totalRemaining).toBe(5700);
+    expect(describeCreditPool(upgraded, date(10, 15)).totalRemaining).toBe(5200);
     expect(creditCycleWindow(upgraded, date(10, 15)).end).toEqual(date(11, 15));
-    expect(upgraded.autoRenew).toBe(false);
   });
 
-  it("preserves prepaid rights after auto-renew is disabled", () => {
+  it("keeps Plus active across monthly credit resets", () => {
     const pro = previewCreditPlan(createCreditDemo(date(10, 1)), "pro", date(10, 15));
-    pro.paidUntil = date(12, 15).toISOString();
     const next = advanceCreditCycle(pro, date(11, 15));
     expect(next.plan).toBe("pro");
     expect(describeCreditPool(next, date(11, 15)).planRemaining).toBe(5000);
-    expect(advanceCreditCycle(next, date(12, 15)).plan).toBe("free");
+    expect(advanceCreditCycle(next, date(12, 15)).plan).toBe("pro");
+  });
+
+  it("migrates old commerce samples without retaining purchased balances or downgrading Plus", () => {
+    const account = previewCreditPlan(createCreditDemo(date(10, 1)), "pro", date(10, 1));
+    account.buckets[0]!.remaining = 3200;
+    window.sessionStorage.setItem("memmy.creditsPreview.demo", JSON.stringify({ ...account, version: 2,
+      balanceSampleVersion: 4, paidUntil: date(10, 20).toISOString(), autoRenew: true,
+      buckets: [...account.buckets, { ...bucket("legacy-purchase", "reward", 800, null), source: "purchase" }] }));
+    const migrated = readCreditDemo(date(10, 25));
+    expect(migrated.plan).toBe("pro");
+    expect(describeCreditPool(migrated, date(10, 25)).totalRemaining).toBe(3200);
+    expect(migrated).not.toHaveProperty("paidUntil");
+    expect(migrated).not.toHaveProperty("autoRenew");
+    expect(readCreditDemo(date(11, 1)).plan).toBe("pro");
+    expect(describeCreditPool(readCreditDemo(date(11, 1)), date(11, 1)).planRemaining).toBe(5000);
+  });
+
+  it("does not reset credits or the anniversary for a repeated upgrade", () => {
+    const account = previewCreditPlan(createCreditDemo(date(10, 1)), "pro", date(10, 1));
+    account.buckets[0]!.remaining = 3200;
+    expect(previewCreditPlan(account, "pro", date(10, 20))).toEqual(account);
   });
 
   it("does not move the anniversary or add credits when re-reading preview state", () => {
@@ -73,7 +90,7 @@ describe("expiry-first deduction", () => {
     const buckets = [
       bucket("plan", "plan", 300, date(11, 15).toISOString()),
       bucket("reward", "reward", 100, date(10, 20).toISOString()),
-      bucket("pack", "purchase", 500, null)
+      bucket("pack", "reward", 500, null)
     ];
     const result = consumeCreditBuckets(buckets, 150, date(10, 15));
     expect(result.buckets.map(b => b.remaining)).toEqual([250, 0, 500]);
@@ -81,11 +98,11 @@ describe("expiry-first deduction", () => {
     expect(buckets[1]!.remaining).toBe(100);
   });
 
-  it("allows a purchased bucket to be first and excludes expired/future grants", () => {
+  it("allows an expiring reward to be first and excludes expired/future grants", () => {
     const result = consumeCreditBuckets([
       bucket("reward", "reward", 20, null),
       bucket("plan", "plan", 100, date(11, 15).toISOString()),
-      bucket("pack", "purchase", 10, date(10, 20).toISOString()),
+      bucket("pack", "reward", 10, date(10, 20).toISOString()),
       bucket("expired", "reward", 999, date(10, 15).toISOString()),
       { ...bucket("future", "reward", 999, null), grantedAt: date(10, 16).toISOString() }
     ], 15.25, date(10, 15));
@@ -94,11 +111,11 @@ describe("expiry-first deduction", () => {
   });
 
   it("never debits below zero or counts the same grant twice", () => {
-    const result = consumeCreditBuckets([bucket("one", "purchase", 0.3, null)], 0.4, date(10, 15));
+    const result = consumeCreditBuckets([bucket("one", "reward", 0.3, null)], 0.4, date(10, 15));
     expect(result.buckets[0]!.remaining).toBe(0);
     expect(result.charged).toBe(0.3);
     expect(result.uncovered).toBe(0.1);
-    const b = bucket("pack-order", "purchase", 200, null);
+    const b = bucket("pack-order", "reward", 200, null);
     const account = grantPreviewCredits(createCreditDemo(date(10, 15)), b);
     expect(grantPreviewCredits(account, b)).toBe(account);
   });

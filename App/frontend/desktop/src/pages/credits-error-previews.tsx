@@ -36,14 +36,9 @@ function CreditNotice({ label, title, children }: {
 function AgentLimitNotice() {
   const text = useCopy();
   const { demo } = useCreditDemo();
-  const intl = import.meta.env.MEMMY_APP_EDITION === "intl";
-  const message = intl
-    ? demo.plan === "pro"
-      ? text("积分不足，当前任务已暂停。下次积分发放后可恢复任务", "Not enough credits. This task is paused until the next credit grant.")
-      : text("积分不足，当前任务已暂停。开通进阶版后可恢复任务", "Not enough credits. This task is paused. A Plus plan can restore access.")
-    : demo.plan === "pro"
-      ? text("积分不足，当前任务已暂停。购买积分后可恢复任务", "Not enough credits. This task is paused. You can resume it after buying credits.")
-      : text("您已达到使用上限，升级套餐或购买积分后可恢复任务", "You've reached your usage limit. Upgrade your plan or buy credits to resume the task.");
+  const message = demo.plan === "pro"
+    ? text("积分不足，当前任务已暂停。可查看积分来源或切换自有模型后继续", "Not enough credits. This task is paused. Check your credits or switch to your own model to continue.")
+    : text("积分不足，当前任务已暂停。可申请升级，权益开通后再继续任务", "Not enough credits. This task is paused. Apply for an upgrade and continue after it is activated.");
   return <div className={styles.limitLine} role="alert" aria-label={text("Agent 任务积分不足", "Agent task out of credits")}>
     <span className={styles.limitMessage}><CircleAlert size={16} aria-hidden="true" />
       {message}
@@ -125,7 +120,7 @@ export function CreditsMemoryPausedPage() {
   const [opened, setOpened] = useState<string | null>(null);
   const [now] = useState(() => new Date());
   const samples = [
-    [text("产品评审：套餐与续费流程", "Product review: plans and renewals"), text("套餐页内完成选购和支付；手动续费最多预购下一期。", "Choose and pay on the plan page; prepay at most one future month.")],
+    [text("产品评审：套餐与申请升级", "Product review: plans and upgrade applications"), text("套餐页查看权益，填写问卷申请升级。", "Compare benefits and fill out the upgrade form.")],
     [text("邀请奖励与明细展示", "Referral rewards and records"), text("注册成功后双方各得 200 积分，奖励按每位好友单独记录。", "Registration grants 200 credits to each person, recorded per friend.")],
     [text("知识库的使用边界", "Knowledge base usage"), text("上传与存储按套餐额度限制；召回产生的模型消耗归入 Agent 任务。", "Uploads and storage use plan quotas; model usage during recall belongs to the Agent task.")]
   ];

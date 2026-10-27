@@ -499,17 +499,6 @@ export function SettingsPageView(props: SettingsPageViewProps) {
   const showGiftQuota = !isByokMode;
   const invitationPromotion = bootstrap?.promotions?.invitation;
   const invitationEnabled = invitationPromotion?.enabled === true;
-  const invitationAmountsMatch = Boolean(
-    invitationPromotion
-    && invitationPromotion.inviterRewardTokens > 0
-    && invitationPromotion.inviterRewardTokens === invitationPromotion.inviteeRewardTokens
-  );
-  const invitationRewardBody = invitationAmountsMatch && invitationPromotion
-    ? t("settings.token.invite.bodyWithReward", {
-        count: formatTokenGiftAmount(invitationPromotion.inviterRewardTokens)
-      })
-    : t("settings.token.invite.body");
-  const creditsInviteBody = t("credits.invite.body");
   const displayInviteCode = invitationInfo?.invitationCode ?? null;
   const inviteDailyLimitReached = invitationInfo?.dailyLimitReached ?? false;
   const showInvitationBanner = invitationEnabled
@@ -1438,7 +1427,7 @@ export function SettingsPageView(props: SettingsPageViewProps) {
         <Gift size={15} strokeWidth={2.1} aria-hidden="true" />
       </span>
       <div className="min-w-0">
-        <p className="text-sm text-text-ink/80 leading-5">{t(creditsPreview ? "credits.invite.title" : "settings.token.invite.title")}</p>
+        <p className="text-sm text-text-ink/80 leading-5">{t("credits.invite.title")}</p>
         <p
           className={`mt-0.5 text-xs leading-4 ${
             inviteDailyLimitReached ? "text-text-ink/50" : "text-text-ink/45"
@@ -1450,9 +1439,7 @@ export function SettingsPageView(props: SettingsPageViewProps) {
               ? t("settings.token.invite.loading")
               : inviteDailyLimitReached
                 ? t("settings.token.invite.dailyLimit")
-                : creditsPreview
-                  ? creditsInviteBody
-                  : invitationRewardBody}
+                : t("credits.invite.body")}
         </p>
       </div>
       {displayInviteCode ? (

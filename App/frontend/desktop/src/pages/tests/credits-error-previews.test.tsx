@@ -34,7 +34,7 @@ describe("credit error examples", () => {
   it("keeps the Agent's visible reply and editable draft after pausing", async () => {
     const original = readCreditDemo();
     await show("agent", <CreditsLimitsPage/>);
-    expect(host.textContent).toContain("您已达到使用上限，升级套餐或购买积分后可恢复任务");
+    expect(host.textContent).toContain("积分不足，当前任务已暂停。可申请升级，权益开通后再继续任务");
     expect(host.querySelector('[aria-label="Agent 任务积分不足"] button')).toBeNull();
     expect(host.querySelector(".agent-model-error-notice")).toBeNull();
     expect(host.textContent).toContain("已展示的回复、工具结果和用户输入保留");
@@ -70,7 +70,7 @@ describe("credit error examples", () => {
     await show("agent&credits-recovered=1", <CreditsLimitsPage/>);
     const rendered = host.textContent ?? "";
     const partial = rendered.indexOf("恢复方式还在整理中。");
-    const warning = rendered.indexOf("您已达到使用上限，升级套餐或购买积分后可恢复任务");
+    const warning = rendered.indexOf("积分不足，当前任务已暂停。可申请升级，权益开通后再继续任务");
     const newUser = rendered.indexOf("积分已经补足。请继续整理恢复方式。");
     const newReply = rendered.indexOf("恢复方式补充如下");
     expect(partial).toBeGreaterThanOrEqual(0);
@@ -135,7 +135,7 @@ describe("credit error examples", () => {
   it("does not suggest upgrading an exhausted Plus plan", async () => {
     await show("agent&credits-plan=pro", <CreditsLimitsPage/>);
     const notice = host.querySelector('[aria-label="Agent 任务积分不足"]');
-    expect(notice?.textContent).toContain("购买积分后可恢复任务");
+    expect(notice?.textContent).toContain("可查看积分来源或切换自有模型后继续");
     expect(notice?.textContent).not.toContain("升级套餐");
   });
   it("keeps error prompts plan-neutral in the international edition", async () => {

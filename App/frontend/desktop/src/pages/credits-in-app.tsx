@@ -1,6 +1,6 @@
 /** Credits balance, plans, and check-in, using the settings usage visual language. */
 import { useState, type ReactNode } from "react";
-import { ArrowLeft, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, Coins, Gift, RefreshCw, Wallet, X } from "lucide-react";
+import { ArrowLeft, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, Coins, Gift, RefreshCw, X } from "lucide-react";
 import { Button } from "../components/button.js";
 import { useTranslation } from "../i18n/use-translation.js";
 import { appActions } from "../state/app-actions.js";
@@ -96,7 +96,7 @@ export function CreditSourceDetails(props: { source: CreditSource; buckets: Cred
   const totalPages = Math.max(1, Math.ceil(buckets.length / pageSize));
   const currentPage = Math.min(page, totalPages);
   const visible = buckets.slice((currentPage - 1) * pageSize, currentPage * pageSize);
-  const icon = props.source === "plan" ? <CalendarDays size={16} /> : props.source === "reward" ? <Gift size={16} /> : <Wallet size={16} />;
+  const icon = props.source === "plan" ? <CalendarDays size={16} /> : <Gift size={16} />;
   return <article className={`${usageStyles.sourceCard} ${expired ? usageStyles.expiredSource : ""}`} aria-label={expired ? t("credits.detail.expired") : t(`credits.source.${props.source}`)}>
     <header className={usageStyles.sourceCardHeader}>
       <div className={usageStyles.sourceIdentity}>
@@ -111,12 +111,11 @@ export function CreditSourceDetails(props: { source: CreditSource; buckets: Cred
       </div>
     </header>
     {buckets.length === 0
-      ? <p className={usageStyles.sourceEmpty}>{t(expired ? "credits.detail.noExpired" : props.source === "reward" ? "credits.detail.noRewards" : props.source === "purchase" ? "credits.detail.noPurchases" : "credits.source.empty")}</p>
+      ? <p className={usageStyles.sourceEmpty}>{t(expired ? "credits.detail.noExpired" : props.source === "reward" ? "credits.detail.noRewards" : "credits.source.empty")}</p>
       : <ul className={usageStyles.sourceBatches}>{visible.map(bucket => {
         const used = Math.round((bucket.granted - bucket.remaining) * 100) / 100;
         const usedPercent = bucket.granted > 0 ? Math.min(100, Math.max(0, used / bucket.granted * 100)) : 0;
-        const label = props.source === "purchase" ? t("credits.source.purchase")
-          : bucket.id.startsWith("checkin:") ? t("credits.detail.checkinReward")
+        const label = bucket.id.startsWith("checkin:") ? t("credits.detail.checkinReward")
           : bucket.id.startsWith("invite:") ? t("credits.detail.inviteReward")
           : bucket.id.startsWith("redeem:") ? t("credits.detail.redeemReward")
           : bucket.id === "legacy-preview-reward" || bucket.id.startsWith("history:") ? t("credits.detail.historyReward")
@@ -165,13 +164,12 @@ function CreditSourceSummary(props: { source: CreditSource; buckets: CreditBucke
   const expiry = expiring[0]?.expiresAt;
   const note = props.source === "plan" ? t("credits.detail.nextRefresh", { time: creditDate(props.nextGrant, language) })
     : expiry ? t("credits.detail.nearestExpiry", { time: creditDate(expiry, language) })
-    : remaining > 0 ? t("credits.source.noExpiry") : t(props.source === "purchase" ? "credits.detail.noPurchases" : "credits.detail.noRewards");
+    : remaining > 0 ? t("credits.source.noExpiry") : t("credits.detail.noRewards");
   return <article className={usageStyles.sourceSummary} aria-label={t(`credits.source.${props.source}`)}>
     <header className={usageStyles.sourceCardHeader}>
-      <h3>{props.source === "plan" ? t("credits.source.plan") : <button type="button" className={usageStyles.sourceTitleLink} onClick={() => dispatch(appActions.navigate(props.source === "purchase" ? "/credit-purchase-details" : "/credit-reward-details"))}>
+      <h3>{props.source === "plan" ? t("credits.source.plan") : <button type="button" className={usageStyles.sourceTitleLink} onClick={() => dispatch(appActions.navigate("/credit-reward-details"))}>
         {t(`credits.source.${props.source}`)}<ChevronRight size={16} aria-hidden="true" />
       </button>}</h3>
-      {props.source === "purchase" && import.meta.env.MEMMY_APP_EDITION !== "intl" && <button type="button" className={usageStyles.sourcePurchaseAction} onClick={() => dispatch(appActions.navigate("/credit-packs"))}>{t("credits.packs.buyMore")}</button>}
     </header>
     <div className={usageStyles.sourceSummaryInfo}>
       <span>{note}</span>
@@ -181,7 +179,7 @@ function CreditSourceSummary(props: { source: CreditSource; buckets: CreditBucke
   </article>;
 }
 
-export function CreditsSourceDetailPage(props: { source: "purchase" | "reward" }) {
+export function CreditsSourceDetailPage(props: { source: "reward" }) {
   const { t } = useTranslation();
   const { demo, now } = useCreditDemo();
   const [period, setPeriod] = useState<"valid" | "expired">("valid");
@@ -190,7 +188,7 @@ export function CreditsSourceDetailPage(props: { source: "purchase" | "reward" }
   const expired = buckets.filter(b => b.expiresAt !== null && Date.parse(b.expiresAt) <= now.getTime());
   const valid = buckets.filter(b => b.expiresAt === null || Date.parse(b.expiresAt) > now.getTime());
   return <CreditsSettingsShell><div className={`${usageStyles.detailContent} ${usageStyles.commercePage}`}>
-    <header className={usageStyles.commerceHeader}><h1>{t(props.source === "purchase" ? "credits.detail.purchaseTitle" : "credits.detail.rewardTitle")}</h1></header>
+    <header className={usageStyles.commerceHeader}><h1>{t("credits.detail.rewardTitle")}</h1></header>
     <div className={usageStyles.creditTabs} role="tablist" aria-label={t("credits.detail.validity")}>
       {(["valid", "expired"] as const).map(value => <button key={value} type="button" role="tab" id={`credits-tab-${value}`} aria-selected={period === value} aria-controls="credits-source-panel" tabIndex={period === value ? 0 : -1} onClick={() => setPeriod(value)} onKeyDown={event => {
         if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
@@ -252,10 +250,10 @@ export function CreditsSettingsPanel(props: { invitationContent?: ReactNode }) {
         </div>
 
 
-        {import.meta.env.MEMMY_APP_EDITION !== "intl" && low && !lowDismissed && (
+        {low && !lowDismissed && (
           <p className={usageStyles.creditLowLine}>
             <span>{t("credits.low")}</span>
-            <button type="button" onClick={() => dispatch(appActions.navigate(demo.plan === "pro" ? "/credit-packs" : "/plans"))}>{t(demo.plan === "pro" ? "credits.packs.buy" : "credits.upgrade")}</button>
+            <button type="button" onClick={() => dispatch(appActions.navigate("/plans"))}>{t(demo.plan === "pro" ? "credits.balance.managePlan" : "credits.upgrade")}</button>
             <button type="button" onClick={dismissLow}>{t("credits.low.dismiss")}</button>
           </p>
         )}
@@ -276,8 +274,8 @@ export function CreditsSettingsPanel(props: { invitationContent?: ReactNode }) {
                 <RefreshCw size={15} className={refreshing ? usageStyles.creditsRefreshSpin : undefined} aria-hidden="true" />
               </button>
             </div>
-            <dl className={`${usageStyles.balanceBreakdown} ${import.meta.env.MEMMY_APP_EDITION === "intl" ? usageStyles.balanceBreakdownIntl : ""}`}>
-              {([ ["plan",pool.planRemaining], ["reward",pool.rewardRemaining], ...(import.meta.env.MEMMY_APP_EDITION === "intl" ? [] : [["purchase",pool.purchaseRemaining] as const]) ] as const).map(([source,value]) => (
+            <dl className={`${usageStyles.balanceBreakdown} ${usageStyles.balanceBreakdownIntl}`}>
+              {([ ["plan",pool.planRemaining], ["reward",pool.rewardRemaining] ] as const).map(([source,value]) => (
                 <div key={source}><dt>{t(`credits.source.${source}`)}</dt><dd>{formatCredits(value,language)}</dd></div>
               ))}
             </dl>
@@ -295,7 +293,7 @@ export function CreditsSettingsPanel(props: { invitationContent?: ReactNode }) {
         </div>
         {redeemOpen && <div id="credits-redeem-panel"><CreditsRedeemForm /></div>}
         <div className={usageStyles.sourceSummaryList}>
-          {(import.meta.env.MEMMY_APP_EDITION === "intl" ? ["plan", "reward"] as const : ["plan", "reward", "purchase"] as const).map(source => <CreditSourceSummary
+          {(["plan", "reward"] as const).map(source => <CreditSourceSummary
             key={source} source={source} buckets={pool.buckets.filter(bucket => bucket.source === source)}
             nextGrant={resetAt}
           />)}

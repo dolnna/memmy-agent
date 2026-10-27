@@ -205,12 +205,15 @@ function RuntimeApp() {
       dispatch(appActions.startupLoading());
 
       try {
-        const errorPreview = import.meta.env.DEV && !window.memmy && creditErrorScenario();
-        if (errorPreview) {
+        const creditsPreview = import.meta.env.DEV && !window.memmy && isCreditsPreviewMode();
+        const errorPreview = creditErrorScenario();
+        if (creditsPreview) {
           const { creditErrorPreviewBootstrap } = await import("./app/credits-error-preview-bootstrap.js");
           if (!isActive) return;
           dispatch(appActions.accountUpdated({ userId: "credits-preview", nickname: "演示用户", email: "" }));
-          dispatch(appActions.bootstrapLoaded(creditErrorPreviewBootstrap(), errorPreview === "agent" ? "/limits" : errorPreview === "memory" ? "/memory" : "/knowledge"));
+          const previewRoute = readLaunchRouteOverride(window.location.search)
+            ?? (errorPreview === "agent" ? "/limits" : errorPreview === "memory" ? "/memory" : errorPreview === "knowledge" ? "/knowledge" : "/plans");
+          dispatch(appActions.bootstrapLoaded(creditErrorPreviewBootstrap(), previewRoute));
           return;
         }
         const runtimeConfig = await getRuntimeConfig();

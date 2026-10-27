@@ -3,10 +3,8 @@ import {
   createCreditDemo,
   CHECKIN_DAILY,
   CREDIT_LEDGER,
-  CREDIT_PURCHASE_VALIDITY_DAYS,
   CREDIT_USED,
   claimCheckin,
-  creditPurchaseExpiresAt,
   describeCheckin,
   describeCreditPool,
   ledgerGroupCredits,
@@ -20,7 +18,6 @@ const base: CreditDemoState = {
   streak: 0,
   cycles: 0,
   bonus: 0,
-  autoRenew: true,
   checkedIn: false
 };
 
@@ -67,18 +64,5 @@ describe("preview ledger", () => {
     const total = CREDIT_LEDGER.reduce((sum, group) => sum + ledgerGroupCredits(group), 0);
     expect(Math.round(total * 100) / 100).toBe(CREDIT_USED);
     expect(CREDIT_LEDGER.find((group) => group.kind === "memory")?.calls.length).toBeGreaterThan(1);
-  });
-});
-
-describe("purchased credit expiry", () => {
-  it("expires the unused portion exactly 90 days after it was granted", () => {
-    const grantedAt = "2026-01-01T12:00:00.000Z";
-    const expiresAt = creditPurchaseExpiresAt(grantedAt);
-    expect(CREDIT_PURCHASE_VALIDITY_DAYS).toBe(90);
-    expect(expiresAt).toBe("2026-04-01T12:00:00.000Z");
-    const demo = createCreditDemo(new Date(grantedAt));
-    demo.buckets.push({ id: "pack", source: "purchase", granted: 200, remaining: 125, grantedAt, expiresAt });
-    expect(describeCreditPool(demo, new Date("2026-04-01T11:59:59.000Z")).purchaseRemaining).toBe(125);
-    expect(describeCreditPool(demo, new Date(expiresAt)).purchaseRemaining).toBe(0);
   });
 });

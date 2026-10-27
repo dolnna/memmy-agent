@@ -63,7 +63,7 @@ import { TokenDetailPage } from "../pages/token-detail-page.js";
 import { ToolsPage } from "../pages/tools-page.js";
 import { WelcomePage } from "../pages/welcome-page.js";
 import { CreditsCheckinPage, CreditsSourceDetailPage } from "../pages/credits-in-app.js";
-import { CreditsPlansPage, CreditsPacksPage, CreditsRedeemPage, CreditsCheckoutPage } from "../pages/credits-commerce.js";
+import { CreditsPlansPage, CreditsRedeemPage } from "../pages/credits-commerce.js";
 import { CreditsLimitsPage, CreditsMemoryPausedPage, CreditsKnowledgeLimitPage } from "../pages/credits-error-previews.js";
 import { creditErrorScenario, isCreditsPreviewMode } from "./credits-preview-mode.js";
 
@@ -324,15 +324,15 @@ function renderRoute(path: AppRoutePath) {
     case "/token-detail":
       return <TokenDetailPage />;
     case "/credit-purchase-details":
-      return isCreditsPreviewMode() ? <CreditsSourceDetailPage source="purchase" /> : <SettingsPage />;
+      return isCreditsPreviewMode() ? <CreditsPlansPage /> : <SettingsPage />;
     case "/credit-reward-details":
       return isCreditsPreviewMode() ? <CreditsSourceDetailPage source="reward" /> : <SettingsPage />;
     case "/credit-packs":
-      return isCreditsPreviewMode() ? <CreditsPacksPage /> : <SettingsPage />;
+      return isCreditsPreviewMode() ? <CreditsPlansPage /> : <SettingsPage />;
     case "/redeem":
       return isCreditsPreviewMode() ? <CreditsRedeemPage /> : <SettingsPage />;
     case "/credit-checkout":
-      return isCreditsPreviewMode() ? <CreditsCheckoutPage /> : <SettingsPage />;
+      return isCreditsPreviewMode() ? <CreditsPlansPage /> : <SettingsPage />;
     case "/plans":
       return isCreditsPreviewMode() ? <CreditsPlansPage /> : <SettingsPage />;
     case "/checkin":

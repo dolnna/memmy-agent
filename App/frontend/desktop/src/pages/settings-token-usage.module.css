@@ -953,179 +953,6 @@ button.ledgerRow {
   }
 }
 
-
-.payFigures {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px 16px;
-}
-
-.payFigures > span {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.payFigures em {
-  color: var(--usage-muted);
-  font-size: var(--codex-text-xs);
-  font-style: normal;
-  line-height: 16px;
-}
-
-.payFigures strong {
-  color: var(--usage-ink);
-  font-size: 16px;
-  font-weight: 600;
-  line-height: 22px;
-  font-variant-numeric: tabular-nums;
-}
-
-.payMethods {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-}
-
-.payMethod {
-  height: 34px;
-  border: 1px solid var(--border-content-panel);
-  border-radius: var(--radius-btn);
-  background: transparent;
-  color: var(--usage-secondary);
-  font-family: inherit;
-  font-size: 13px;
-  line-height: 34px;
-  cursor: pointer;
-}
-
-.payMethod:hover {
-  background: var(--usage-row-hover);
-}
-
-.payMethodOn {
-  border-color: var(--color-action-sky);
-  background: color-mix(in srgb, var(--color-action-sky) 8%, transparent);
-  color: var(--color-action-sky-hover);
-  font-weight: 600;
-}
-
-.paySheet {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  padding-top: 8px;
-  border-top: 1px dashed var(--usage-track);
-}
-
-.paySheetTitle {
-  margin: 0;
-  color: var(--usage-secondary);
-  font-size: var(--codex-text-sm);
-  line-height: var(--codex-leading-sm);
-  text-align: center;
-}
-
-.payCode {
-  position: relative;
-  width: 168px;
-  height: 168px;
-  overflow: hidden;
-  border-radius: 12px;
-  background: #fff;
-}
-
-.payCode svg {
-  display: block;
-  width: 100%;
-  height: 100%;
-}
-
-.payCodeLocked svg {
-  filter: blur(5px);
-}
-
-.payCodeCover {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  padding: 16px;
-  background: color-mix(in srgb, #fff 62%, transparent);
-  text-align: center;
-}
-
-.payCodeCover p {
-  margin: 0;
-  color: var(--usage-ink);
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 18px;
-}
-
-.payAgreeRow {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  column-gap: 4px;
-}
-
-.payAgree {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  width: auto;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--usage-secondary);
-  font-family: inherit;
-  font-size: var(--codex-text-xs);
-  line-height: 18px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.payAgreeLink {
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--color-action-sky);
-  font-family: inherit;
-  font-size: var(--codex-text-xs);
-  line-height: 18px;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  cursor: pointer;
-}
-
-.payAgreeMark {
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  margin-top: 1px;
-  border: 1px solid var(--usage-muted);
-  border-radius: 4px;
-  color: var(--color-background-paper);
-}
-
-.payAgreeOn .payAgreeMark {
-  border-color: var(--color-action-sky);
-  background: var(--color-action-sky);
-}
-
-.payAction {
-  width: 100%;
-}
-
 button.creditsAction {
   width: fit-content;
   max-width: 100%;
@@ -1141,14 +968,6 @@ button.creditsAction {
 button.creditsAction:hover:not(:disabled) {
   transform: none;
   box-shadow: none;
-}
-
-.payNote {
-  margin: 0;
-  color: var(--usage-muted);
-  font-size: var(--codex-text-xs);
-  line-height: 18px;
-  text-align: center;
 }
 
 /* --- Responsive --- */
@@ -1233,50 +1052,22 @@ button.creditsAction:hover:not(:disabled) {
 .creditInfo:hover { color:var(--color-action-sky); background:var(--usage-row-bg); }
 .creditEntryActions { display:flex; flex-wrap:wrap; gap:10px; padding-top:20px; }
 .entitlementGrid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
-.entitlementCard { position:relative; min-width:0; border:1px solid var(--usage-card-border); border-radius:var(--radius-card,16px); background:var(--color-background-paper); padding:20px; transition:border-color .15s,box-shadow .15s; }
+.entitlementCard { position:relative; min-width:0; border:1px solid var(--usage-card-border); border-radius:var(--radius-card,16px); background:var(--color-background-paper); padding:24px; transition:border-color .15s,box-shadow .15s; }
 .entitlementSelected { border-color:var(--color-action-sky) !important; box-shadow:0 0 0 1px var(--color-action-sky); }
-.planSelection { width:100%; text-align:left; border:0; background:transparent; color:inherit; padding:0 22px 16px 0; cursor:pointer; border-bottom:1px solid var(--color-border-stone); }
-.planName { display:block; font-size:16px; font-weight:600; margin-bottom:6px; }
+.planName { display:block; font-size:20px; font-weight:600; margin-bottom:6px; }
 .planSummary { display:block; color:var(--usage-muted); font-size:var(--codex-text-sm); line-height:var(--codex-leading-sm); }
-.selectionDot { position:absolute; right:20px; top:23px; width:14px; height:14px; border:1px solid var(--color-border-stone); border-radius:50%; }
-.entitlementSelected .selectionDot { border-color:var(--color-action-sky); background:var(--color-action-sky); box-shadow:inset 0 0 0 3px var(--color-background-paper); }
-.benefitList { list-style:none; padding:16px 0 0; margin:0; display:grid; gap:12px; }
+.benefitList { list-style:none; padding:24px 0 0; margin:0; display:grid; gap:12px; }
 .benefitList li { display:flex; gap:10px; align-items:center; font-size:var(--codex-text-base); line-height:var(--codex-leading-base); color:var(--usage-secondary); }
 .benefitIcon { display:flex; color:var(--usage-secondary); flex-shrink:0; }
-.purchaseBar { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:20px; margin-top:24px; padding:18px 20px; border:1px solid var(--usage-card-border); border-radius:var(--radius-card,16px); background:var(--color-background-paper); }
-.purchaseBar > div { display:flex; align-items:baseline; gap:16px; }
-.purchaseBar span { font-size:14px; color:var(--usage-secondary); }
-.purchaseBar strong { font-size:23px; font-weight:600; }
-.purchaseBar small { font-size:13px; font-weight:400; color:var(--usage-muted); margin-left:3px; }
-.renewalRow { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:16px; margin-top:24px; padding-top:24px; border-top:1px solid var(--color-border-stone); }
-.renewalRow strong { font-size:14px; }
-.renewalRow p { font-size:13px; color:var(--usage-muted); margin-top:5px; }
-.packChoices { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; }
-.packChoice { display:flex; flex-direction:column; align-items:flex-start; gap:16px; min-width:0; text-align:left; padding:24px 20px; border:1px solid var(--usage-card-border); border-radius:var(--radius-card,16px); color:var(--usage-ink); background:var(--color-background-paper); cursor:pointer; }
-.packChoice strong { display:flex; align-items:center; gap:5px; font-size:20px; font-weight:600; white-space:nowrap; }
-.packCreditIcon { flex:none; color:var(--color-action-sky); }
-.packChoice small { font-size:var(--codex-text-sm); font-weight:400; }
-.packChoice > span { font-size:var(--codex-text-base); color:var(--usage-secondary); }
 .redeemForm { max-width:440px; display:flex; flex-direction:column; align-items:stretch; gap:18px; padding:28px; border:1px solid var(--color-border-stone); border-radius:var(--radius-card,16px); background:var(--color-background-paper); }
 .redeemIcon { color:var(--color-action-sky); }
 .redeemForm label { font-size:15px; font-weight:500; }
 .redeemForm input { min-width:0; width:100%; box-sizing:border-box; padding:12px 14px; border:1px solid var(--color-border-stone); border-radius:var(--radius-input,10px); background:var(--color-background-paper); color:var(--usage-ink); font:inherit; }
-.checkoutPanel { display:flex; flex-direction:column; gap:24px; padding:24px; border:1px solid var(--usage-card-border); border-radius:var(--radius-card,16px); background:var(--color-background-paper); }
-.checkoutSummary { display:flex; justify-content:space-between; align-items:center; gap:16px; border-bottom:1px solid var(--color-border-stone); padding-bottom:20px; }
-.checkoutSummary > div { display:flex; align-items:center; gap:6px; }
-.checkoutSummary h2 { margin:0; font-size:17px; font-weight:600; }
-.checkoutSummary strong { font-size:24px; }
-.checkoutAgreement { display:flex; align-items:center; flex-wrap:wrap; gap:4px; color:var(--usage-secondary); font-size:13px; }
-.checkoutAgreement label { display:flex; gap:8px; align-items:center; }
-.checkoutAgreement input { accent-color:var(--color-action-sky); }
-.checkoutAgreement button { padding:0; border:0; background:transparent; color:var(--color-action-sky); cursor:pointer; font:inherit; }
-.planSelection:focus-visible, .packChoice:focus-visible, .creditInfo:focus-visible { outline:2px solid var(--color-action-sky); outline-offset:4px; }
+.creditInfo:focus-visible { outline:2px solid var(--color-action-sky); outline-offset:4px; }
 @container (max-width: 550px) {
-  .entitlementGrid, .packChoices { grid-template-columns:1fr; }
+  .entitlementGrid { grid-template-columns:1fr; }
   .commerceHeader { align-items:flex-start; }
-  .purchaseBar { padding:16px; }
   .redeemForm { padding:20px; }
-  .checkoutPanel { padding:18px; }
 }
 
 /* Balance first, then source summaries and their individual credit grants. */
@@ -1333,63 +1124,13 @@ button.creditsAction:hover:not(:disabled) {
   .sourceHeaderEnd { margin-left:24px; justify-content:flex-start; }
   .balanceAmount strong { font-size:32px; }
 }
-
-.planCheckout { margin-top:24px; }
 .benefitValidity { color:var(--usage-muted); font-size:var(--codex-text-sm); white-space:nowrap; }
-.checkoutPeriod { color:var(--usage-muted); font-size:var(--codex-text-sm); font-weight:400; margin-left:4px; }
-
-.subscriptionOptions { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px; margin-bottom:20px; }
-.subscriptionOption { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:16px; border:1px solid var(--color-border-stone); border-radius:var(--radius-card); background:var(--color-background-paper); color:var(--usage-ink); font-size:var(--codex-text-base); cursor:pointer; }
-.subscriptionOption em { font-style:normal; color:var(--color-action-sky); font-size:var(--codex-text-sm); margin-left:4px; }
-.subscriptionOption strong { font-weight:600; font-size:16px; white-space:nowrap; }
-.subscriptionOption small { font-size:var(--codex-text-sm); font-weight:400; margin-left:2px; }
-.subscriptionOption:focus-visible { outline:2px solid var(--color-action-sky); outline-offset:3px; }
-.scanPayment { display:flex; align-items:center; gap:24px; }
-.scanCode { position:relative; flex:0 0 168px; align-self:flex-start; }
-.scanCode img { width:168px; height:168px; display:block; border-radius:var(--radius-input); }
-.scanCodeLocked { filter:blur(3px); opacity:.35; }
-.scanCodeCaption { display:block; text-align:center; font-size:var(--codex-text-xs); line-height:var(--codex-leading-xs); color:var(--usage-muted); margin-top:4px; }
-.scanCodeCover { position:absolute; inset:0 0 20px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; font-size:var(--codex-text-sm); color:var(--usage-secondary); }
-.scanPaymentDetails { min-width:0; display:flex; flex:1; flex-direction:column; align-items:flex-start; gap:12px; }
-.scanMethod { margin:0; font-size:var(--codex-text-sm); color:var(--usage-muted); }
-.scanAmount { display:flex; align-items:baseline; gap:3px; }
-.scanAmount strong { font-size:24px; font-weight:600; font-variant-numeric:tabular-nums; }
-.scanAmount > span { font-size:var(--codex-text-sm); color:var(--usage-secondary); }
-.scanSummary { margin:0; font-size:var(--codex-text-sm); line-height:var(--codex-leading-base); color:var(--usage-secondary); }
-.packCheckoutDetails { align-self:stretch; gap:14px; }
-.packCheckoutRow, .packCheckoutTotal { display:flex; align-items:center; justify-content:space-between; gap:16px; width:100%; color:var(--usage-secondary); font-size:var(--codex-text-sm); }
-.packCheckoutRow strong { color:var(--usage-ink); font-weight:600; font-variant-numeric:tabular-nums; }
-.packValidityNote { margin:0; color:var(--usage-muted); font-size:var(--codex-text-sm); line-height:var(--codex-leading-sm); }
-.packQuantity { display:inline-flex; align-items:center; gap:6px; }
-.packQuantity button { display:grid; place-items:center; width:28px; height:28px; padding:0; border:1px solid var(--color-border-stone); border-radius:var(--radius-input,10px); background:var(--color-background-paper); color:var(--usage-ink); cursor:pointer; }
-.packQuantity button:disabled { opacity:.4; cursor:not-allowed; }
-.packQuantity button:focus-visible { outline:2px solid var(--color-action-sky); outline-offset:2px; }
-.packQuantity output { min-width:32px; text-align:center; color:var(--usage-ink); font-variant-numeric:tabular-nums; }
-.packCheckoutTotal { margin-top:auto; padding-top:12px; border-top:1px solid var(--usage-track); }
-.packCheckoutTotal strong { color:var(--usage-ink); font-size:24px; font-weight:600; font-variant-numeric:tabular-nums; }
-@container (max-width:550px) {
-  .scanPayment { flex-direction:column; align-items:stretch; gap:20px; }
-  .scanCode { align-self:center; flex-basis:auto; }
-}
 
 @container (max-width: 380px) {
   .balanceBreakdown { grid-template-columns:1fr; gap:12px; }
   .balanceBreakdown > div { display:flex; justify-content:space-between; align-items:baseline; gap:12px; }
   .balanceBreakdown dt { margin:0; }
 }
-
-.purchaseHistory { margin-top:32px; }
-.purchaseHistory h2 { margin:0 0 16px; font-size:var(--codex-text-base); font-weight:600; }
-.purchaseHistoryScroll { overflow-x:auto; }
-.purchaseHistoryTable { width:100%; border-collapse:collapse; font-size:var(--codex-text-sm); font-variant-numeric:tabular-nums; text-align:left; }
-.purchaseHistoryTable th { font-weight:400; color:var(--usage-muted); background:var(--usage-row-bg); }
-.purchaseHistoryTable th, .purchaseHistoryTable td { padding:14px 12px; white-space:nowrap; border-bottom:1px solid var(--usage-track); }
-.purchaseHistoryTable td { color:var(--usage-secondary); }
-.purchaseHistoryTable th:first-child, .purchaseHistoryTable td:first-child { padding-left:16px; }
-.purchaseHistoryTable th:last-child, .purchaseHistoryTable td:last-child { text-align:right; padding-right:16px; }
-.purchaseHistory > button { display:block; margin:12px auto 0; }
-.orderCompleted { color:var(--color-action-sky); }
-.orderClosed { color:var(--usage-muted); }
 
 .sourceSummaryList { border:1px solid var(--usage-card-border); border-radius:var(--radius-card,16px); background:var(--color-background-paper); padding:0 24px; }
 .sourceSummary { padding:20px 0; }
@@ -1422,47 +1163,31 @@ button.creditsAction:hover:not(:disabled) {
 .creditPaginationSummary select:focus-visible { outline:2px solid var(--color-action-sky); outline-offset:2px; }
 .creditPaginationControls > span { min-width:40px; text-align:center; font-variant-numeric:tabular-nums; }
 
-.renewalAccount { padding:24px; border:1px solid var(--color-border-stone); border-radius:var(--radius-card); background:var(--color-background-paper); }
-.renewalAccountHead { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:16px; }
-.renewalAccountHead h2 { margin:0; font-size:16px; font-weight:600; }
-.renewalAccountHead p { margin:6px 0 0; color:var(--usage-muted); font-size:var(--codex-text-sm); }
-.renewalFacts { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:20px 24px; border-top:1px solid var(--color-border-stone); padding-top:20px; margin:20px 0 0; }
-.renewalFacts dt { color:var(--usage-muted); font-size:var(--codex-text-sm); }
-.renewalFacts dd { color:var(--usage-ink); margin:6px 0 0; font-size:var(--codex-text-base); font-variant-numeric:tabular-nums; }
-.renewalSuccess { display:flex; align-items:flex-start; gap:10px; padding:16px 20px; margin-bottom:20px; border-radius:var(--radius-card); background:color-mix(in srgb,var(--color-action-sky) 10%,var(--color-background-paper)); color:var(--usage-ink); font-size:var(--codex-text-base); }
-.renewalSuccess svg { color:var(--color-action-sky); flex-shrink:0; }
-.renewalSuccess strong { font-weight:600; }
-.renewalSuccess p { margin:4px 0 0; font-size:var(--codex-text-sm); color:var(--usage-secondary); }
-.renewalPrepaid { margin-top:20px; }
-.renewalRefund { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px 16px; margin-top:24px; padding-top:20px; border-top:1px solid var(--color-border-stone); }
-.renewalRefund a { display:inline-flex; align-items:center; min-height:32px; padding:6px 12px; border:1px solid var(--color-border-stone); border-radius:var(--radius-btn); color:var(--usage-ink); font-size:var(--codex-text-sm); text-decoration:none; }
-.renewalRefund a:hover { border-color:var(--color-action-sky); color:var(--color-action-sky); }
-.renewalRefund a:focus-visible { outline:2px solid var(--color-action-sky); outline-offset:3px; }
-.renewalRefund .renewalEmail { min-height:auto; padding:0; border:0; color:var(--usage-muted); }
-.renewalRefund .renewalEmail:hover { color:var(--color-action-sky); text-decoration:underline; }
-.renewalPending { margin-top:20px; padding:20px 24px; border:1px solid var(--color-border-stone); border-radius:var(--radius-card); background:var(--color-background-paper); }
-.renewalPendingHead { display:flex; align-items:center; gap:12px; }
-.renewalPendingHead h2 { margin:0; font-size:var(--codex-text-base); font-weight:600; }
-.renewalPendingHead p { margin:4px 0 0; color:var(--usage-muted); font-size:var(--codex-text-sm); }
-.renewalPendingHead strong { margin-left:auto; font-size:20px; font-variant-numeric:tabular-nums; }
-.renewalPendingIcon { flex:none; color:var(--color-action-sky); animation:renewalPendingSpin 1.5s linear infinite; }
-.renewalPendingDetails { display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px 16px; margin-top:18px; padding-top:16px; border-top:1px solid var(--color-border-stone); color:var(--usage-secondary); font-size:var(--codex-text-sm); }
-@keyframes renewalPendingSpin { to { transform:rotate(360deg); } }
-@media (prefers-reduced-motion:reduce) { .renewalPendingIcon { animation:none; } }
-@container (max-width:380px) { .renewalFacts { grid-template-columns:1fr; } }
-
-.renewalFailure { display:flex; align-items:flex-start; gap:8px; margin-top:20px; font-size:var(--codex-text-sm); line-height:1.5; }
-.renewalFailure > svg { flex:none; margin-top:2px; color:var(--color-status-error); }
-.renewalFailure strong { color:var(--color-status-error); font-weight:500; }
-.renewalFailure p { margin:4px 0 0; color:var(--usage-secondary); }
-.renewalRefund > span { color:var(--usage-muted); font-size:var(--codex-text-sm); }
-
-.paymentFailureIcon { color:var(--color-status-error); }
-.subscriptionOption:disabled, .payMethod:disabled { cursor:default; opacity:.65; }
-
 .modelUsageTabs { display:inline-flex; gap:4px; max-width:100%; padding:4px; margin-bottom:24px; border:0; border-radius:var(--radius-input); background:var(--color-canvas-oat); }
 .modelUsageTabs button { min-width:104px; padding:7px 16px; border:0; border-radius:calc(var(--radius-input) - 3px); background:transparent; color:var(--usage-secondary); font-family:inherit; font-size:var(--codex-text-base); line-height:20px; font-weight:400; cursor:pointer; transition:background .15s,color .15s; }
 .modelUsageTabs button:hover { color:var(--usage-ink); }
 .modelUsageTabs button[aria-selected="true"] { color:var(--usage-ink); background:var(--color-background-paper); font-weight:500; box-shadow:none; }
 .modelUsageTabs button:focus-visible { outline:2px solid var(--color-action-sky); outline-offset:3px; }
 .modelUsageUpdated { display:flex; justify-content:flex-end; margin-bottom:12px; }
+
+.applicationPlanHeading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.applicationPlanHeading h2 { margin:0; }
+.applicationCurrent { color:var(--usage-muted); font-size:var(--codex-text-xs); }
+.applicationPanel { margin-top:24px; border:1px solid var(--usage-card-border); border-radius:var(--radius-card,16px); padding:24px; background:var(--color-background-paper); }
+.applicationFacts { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:20px; margin:0; }
+.applicationFacts dt { color:var(--usage-muted); font-size:var(--codex-text-sm); }
+.applicationFacts dd { margin:8px 0 0; font-variant-numeric:tabular-nums; }
+@container (max-width:480px) { .applicationFacts { grid-template-columns:1fr; } }
+
+
+.planPriceRow { display:flex; flex-wrap:wrap; align-items:baseline; column-gap:12px; row-gap:4px; margin:24px 0 20px; min-height:42px; }
+.planPrice { display:inline-flex; align-items:baseline; gap:6px; white-space:nowrap; color:var(--usage-ink); }
+.planPrice strong { font-size:36px; line-height:1.15; font-weight:650; letter-spacing:-.03em; }
+.planPrice > span { font-size:var(--codex-text-sm); color:var(--usage-secondary); }
+.planOriginalPrice { font-size:var(--codex-text-sm); color:var(--usage-muted); white-space:nowrap; }
+.entitlementCard .planAction { display:flex; align-items:center; justify-content:center; width:100%; min-height:42px; text-decoration:none; border-radius:var(--radius-pill); font-weight:600; }
+
+.entitlementCard button.planAction:not(:disabled) { color:var(--color-action-sky); border-color:var(--color-action-sky); background:transparent; }
+
+.commerceHeader .planStatus { display:flex; align-items:center; flex-wrap:nowrap; gap:4px; }
+.planOpenError { margin:12px 0 0; font-size:var(--codex-text-sm); line-height:1.5; }
